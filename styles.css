@@ -1,288 +1,651 @@
+/* ---------------------------------------------------------------------------
+   Harmonle - the ear-training Wordle, dressed as a lead sheet.
+
+   Palette, type and shape follow BRANDING.md: cream paper, charcoal ink, blush
+   and gold accents, Playfair / Cormorant / Jost, and the five pigments that
+   each mean exactly one thing. Chord symbols are hand-lettered, the way a Real
+   Book page is; everything else is quiet so the colours that carry meaning are
+   the loudest things on the page.
+--------------------------------------------------------------------------- */
 :root {
-  --bg: #0f1117;
-  --panel: #171a23;
-  --panel-2: #1f2430;
-  --line: #2b3140;
-  --text: #e9ecf2;
-  --muted: #9aa3b5;
-  --hit: #4a9e5c;
-  --near: #c8a02e;
-  --miss: #3a4152;
-  --accent: #6d8bff;
-  --radius: 12px;
-  --font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --cream:      #faf6f0;
+  --cream-2:    #f2ebe1;
+  --paper:      #fffcf7;
+  --charcoal:   #241f1d;
+  --blush:      #d9a6a0;
+  --blush-deep: #c07f79;
+  --gold:       #b08d57;
+  --line:       #e4d9cc;
+  --text:       #3a332f;
+  --text-soft:  #6b615a;
+
+  /* Fixed meaning, both modes - which is why they sit outside the mode palette
+     below and the mode accent is chosen to stay clear of them. Here they read:
+     sage, the component is right and in the right slot; gold, it is in the
+     chord but not where you put it; rust, it is outside the chord. Naming where
+     a note sits, never marking the player. */
+  --sage:       #6f7f63;
+  --approach:   #8fae6d;
+  --enclosure:  #3f8f88;
+  --rust:       #a4553f;
+  --unresolved: #b6afa4;
+
+  --wash:        rgba(217, 166, 160, 0.16);
+  --wash-strong: rgba(217, 166, 160, 0.26);
+
+  --serif:  "Playfair Display", Georgia, "Times New Roman", serif;
+  --script: "Cormorant Garamond", Georgia, serif;
+  --sans:   "Jost", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --hand:   "Kalam", "Bradley Hand", "Segoe Print", cursive;
+  --mono:   ui-monospace, Menlo, Consolas, monospace;
+
+  --max: 1080px;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f6f7fb;
-    --panel: #ffffff;
-    --panel-2: #eef0f6;
-    --line: #dce0ea;
-    --text: #151824;
-    --muted: #5d6578;
-    --miss: #a7adbd;
-  }
+/* Practice is the same page in a different light: paper drops a stop and goes
+   cooler, the rose accent becomes slate. Tokens only - nothing below this block
+   knows the page changed colour, and anything added later is themed by having
+   used the palette in the first place. The daily is the performance; this is
+   the room you work in. */
+body.practice {
+  --cream:      #eeedea;
+  --cream-2:    #e1e0da;
+  --paper:      #fafaf7;
+  --charcoal:   #20202a;
+  --line:       #d7d5cd;
+  --text:       #343139;
+  --text-soft:  #656069;
+  --blush:      #99a1bb;
+  --blush-deep: #5c6488;
+
+  --wash:        rgba(92, 100, 136, 0.15);
+  --wash-strong: rgba(92, 100, 136, 0.24);
 }
 
 * { box-sizing: border-box; }
 
+/* The browser's own rule for this is the weakest there is, so any class that
+   sets `display` silently beats it. One rule, stated once, so hiding something
+   needs no CSS at all. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
-  overflow-x: hidden;
-  background: var(--bg);
+  background: var(--cream);
   color: var(--text);
-  font-family: var(--font);
+  font-family: var(--sans);
+  font-weight: 300;
+  font-size: 16px;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
 
-.topbar {
+h1, h2, h3 {
+  font-family: var(--serif);
+  font-weight: 600;
+  color: var(--charcoal);
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+button { font-family: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--blush-deep); outline-offset: 2px; }
+
+.wrap {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding-inline: 24px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-size: 11px;
+  color: var(--blush-deep);
+  font-weight: 500;
+  margin: 0 0 12px;
+}
+
+/* The change of light is a change of light, so it reads as one: the surfaces
+   carrying the palette fade rather than snap. The keys are left out on purpose
+   - they answer a finger, and a key that took 280ms to look pressed would be
+   worse at the job it does every second. */
+body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease, border-color 280ms ease, color 280ms ease; }
+
+/* --- masthead ------------------------------------------------------------ */
+.top-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: 10px 24px;
+  padding-block: 14px;
   border-bottom: 1px solid var(--line);
-  background: var(--panel);
 }
 
-.brand { display: flex; align-items: center; gap: 12px; }
-.logo { font-size: 28px; }
-.topbar h1 { margin: 0; font-size: 20px; letter-spacing: 0.02em; }
-.tagline { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
-.topbar-actions { display: flex; gap: 8px; }
-
-.icon-btn {
-  width: 36px; height: 36px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
-  font-size: 15px;
-  cursor: pointer;
-}
-.icon-btn:hover { border-color: var(--accent); }
-
-main {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: 18px 16px 48px;
+/* Engraved along a line rather than across a page - feel, title, credit - the
+   way a chart's head reads left to right. */
+.sheet-head {
   display: flex;
-  flex-direction: column;
-  gap: 18px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  min-width: 0;
+}
+.style-mark {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--text-soft);
+}
+.sheet-title {
+  font-size: clamp(17px, 2.2vw, 21px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.sheet-credit {
+  font-family: var(--script);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--text-soft);
 }
 
-/* controls */
-.controls {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  padding: 14px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.seg { display: flex; grid-column: 1 / -1; background: var(--panel-2); border-radius: 10px; padding: 4px; }
-.seg-btn {
-  flex: 1;
-  padding: 9px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.seg-btn.is-active { background: var(--accent); color: #fff; }
-
-.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 12px; color: var(--muted); }
-.field select {
-  width: 100%;
-  max-width: 100%;
-  padding: 9px 10px;
-  border-radius: 9px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-}
-.field-check { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 8px; }
-.field-check em { font-style: normal; opacity: 0.7; }
-
-.puzzle-label { margin: -6px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
-
-/* player */
-.player { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.play-btn {
-  display: inline-flex;
+.top-bar-right {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
-  gap: 10px;
-  padding: 16px 34px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-size: 17px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 6px 18px rgba(109, 139, 255, 0.28);
+  gap: 10px 14px;
+  min-width: 0;
 }
-.play-btn:active { transform: translateY(1px); }
-.play-icon { font-size: 14px; }
-.player-side { display: flex; gap: 8px; }
 
-.ghost-btn {
-  padding: 9px 14px;
+/* Something you are in, not something you do - so, a pill. */
+.status {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-soft);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
+  border-radius: 30px;
+  padding: 5px 15px;
+  white-space: nowrap;
 }
-.ghost-btn:hover { border-color: var(--accent); }
+.status[data-state="done"] { color: var(--gold); border-color: var(--gold); }
 
-/* board */
+.mode-switch {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  overflow: hidden;
+}
+.mode-option {
+  background: none;
+  border: none;
+  padding: 7px 15px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.mode-option:hover { color: var(--blush-deep); }
+.mode-option[aria-checked="true"] { background: var(--charcoal); color: var(--cream); }
+
+.tools { display: flex; align-items: center; gap: 12px; }
+
+.help-button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+  color: var(--text-soft);
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1;
+}
+.help-button:hover { border-color: var(--blush); color: var(--blush-deep); }
+
+/* No box at all: a blush underline that deepens on hover. */
+.link-btn {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--blush);
+  padding: 0 0 2px;
+  font-size: 11px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--charcoal);
+  font-weight: 500;
+}
+.link-btn:hover { color: var(--blush-deep); border-color: var(--blush-deep); }
+.link-btn[aria-pressed="true"] { color: var(--blush-deep); border-bottom-width: 2px; border-color: var(--blush-deep); }
+
+/* --- the setup row ------------------------------------------------------- */
+/* A second row of the top bar rather than a zone of its own: `flex-basis: 100%`
+   in a wrapping row is all "always on its own line" needs. */
+.setup {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.field-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+/* Paper radius: a sheet does not have rounded corners. */
+.field select {
+  max-width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  padding: 0 6px;
+  height: 28px;
+  line-height: 1;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--charcoal);
+}
+.field select:focus { outline: 1px solid var(--blush-deep); }
+.instrument { font-size: 12px; color: var(--text-soft); }
+.instrument em { font-style: normal; opacity: 0.75; }
+
+/* --- the sheet ----------------------------------------------------------- */
+.sheet-section { padding-block: 24px 20px; }
+
+/* Depth is used once, here: a sheet laid on a desk. Nothing else floats. */
+.sheet {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 0 var(--cream-2), 0 14px 34px rgba(36, 31, 29, 0.06);
+  padding: clamp(20px, 4vw, 40px);
+}
+
+.lede {
+  font-family: var(--script);
+  font-style: italic;
+  font-size: 17px;
+  line-height: 1.45;
+  color: var(--text-soft);
+  max-width: 62ch;
+  margin: 0 0 20px;
+}
+
+/* The clue itself. The play button is the primary action of this section, and
+   there is one per section at most. */
+.clue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.play-btn {
+  background: var(--charcoal);
+  color: var(--cream);
+  border: 1px solid var(--charcoal);
+  border-radius: 1px;
+  padding: 10px 22px;
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+}
+.play-btn:hover:not(:disabled) { background: var(--blush-deep); border-color: var(--blush-deep); }
+.play-btn:disabled { opacity: 0.35; cursor: default; }
+.plays { font-size: 12px; color: var(--text-soft); margin-left: auto; white-space: nowrap; }
+
+/* --- the board ----------------------------------------------------------- */
 .board-head, .row {
   display: grid;
-  grid-template-columns: 1.2fr 1.6fr 0.7fr;
+  grid-template-columns: 1.1fr 1.3fr 0.6fr;
   gap: 6px;
 }
 .board-head {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
+  letter-spacing: 0.2em;
+  color: var(--blush-deep);
   text-align: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  font-weight: 500;
 }
 .board { display: flex; flex-direction: column; gap: 6px; }
+
 .cell {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 46px;
+  min-height: 52px;
   padding: 4px 6px;
-  border-radius: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
   border: 1px solid var(--line);
-  background: var(--panel);
+  border-radius: 1px;
+  background: var(--cream);
+  text-align: center;
+  font-size: 14px;
+  color: var(--text);
 }
-.cell.blank { opacity: 0.55; }
-.cell.hit { background: var(--hit); border-color: var(--hit); color: #fff; }
-.cell.near { background: var(--near); border-color: var(--near); color: #17190f; }
-.cell.miss { background: var(--miss); border-color: var(--miss); color: #fff; }
+.cell.blank { background: none; }
+.cell.hit { background: var(--sage); border-color: var(--sage); color: var(--paper); }
+.cell.near { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
+.cell.miss { background: var(--rust); border-color: var(--rust); color: var(--paper); }
 
-/* picker */
-.picker {
+/* Chord symbols are in the hand face, and nothing else is. */
+.cell .symbol { font-family: var(--hand); font-weight: 700; font-size: clamp(17px, 2.2vw, 22px); line-height: 1.1; }
+.cell .tally { font-size: 12px; letter-spacing: 0.1em; font-weight: 500; }
+.cell .alt { opacity: 0.68; }
+
+/* Handwriting faces have no flat or sharp glyph, so borrow the serif's. */
+.acc { font-family: var(--serif); font-weight: 500; font-size: 0.82em; padding-inline: 0.02em; }
+.ext { font-size: 0.74em; vertical-align: 0.42em; }
+
+/* --- the dock: your answer, always in reach ------------------------------ */
+.dock {
+  background: var(--cream-2);
+  border-top: 1px solid var(--line);
+  padding-block: 16px 22px;
+}
+/* State that has to be visible from across the room is an inset top rule. */
+.dock.done { box-shadow: inset 0 3px 0 var(--rust); }
+
+/* Reserves its height always, so the dock never grows and shrinks under the
+   hands as the answer changes. */
+.feedback {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 18px;
+  min-height: 46px;
+  margin-bottom: 12px;
 }
-.picker.is-done { opacity: 0.45; pointer-events: none; }
-.picker-group h2 {
-  margin: 0 0 8px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-.chip-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
-.chip-grid.roots { grid-template-columns: repeat(6, 1fr); }
-.chip {
-  padding: 10px 4px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--panel-2);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.chip:hover { border-color: var(--accent); }
-.chip.is-picked { background: var(--accent); border-color: var(--accent); color: #fff; }
+.verdict { font-family: var(--serif); font-size: 17px; color: var(--charcoal); }
+.verdict.matches { color: var(--sage); }
+.played { font-size: 13.5px; color: var(--text-soft); letter-spacing: 0.04em; }
+.played .symbol { font-family: var(--hand); font-weight: 700; font-size: 18px; color: var(--charcoal); }
+.feedback .link-btn { margin-left: auto; }
 
-.submit-btn {
-  padding: 13px 18px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--hit);
-  color: #fff;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
+.picker-group + .picker-group { margin-top: 16px; }
+.picker.done { opacity: 0.5; pointer-events: none; }
+
+/* The keyboard: a root is a key, not a word in a list. */
+.keyboard {
+  position: relative;
+  height: 112px;
+  display: flex;
+  border: 1px solid var(--charcoal);
+  background: var(--charcoal);
+  user-select: none;
+  touch-action: manipulation;
 }
-.submit-btn:disabled { background: var(--miss); cursor: not-allowed; }
+.key { position: relative; border: 0; padding: 0; font: inherit; }
+.key.white { flex: 1 1 0; background: var(--paper); border-right: 1px solid var(--charcoal); }
+.key.white:last-of-type { border-right: 0; }
+.key.black {
+  position: absolute;
+  top: 0;
+  height: 62%;
+  background: var(--charcoal);
+  border: 1px solid var(--charcoal);
+  z-index: 2;
+}
+.key[aria-pressed="true"] { background: var(--blush-deep); border-color: var(--blush-deep); }
+.key .key-name {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  pointer-events: none;
+}
+.key.white .key-name { bottom: 8px; color: var(--text-soft); }
+.key.black .key-name { bottom: 6px; color: var(--cream); font-size: 9px; }
+.key[aria-pressed="true"] .key-name { color: var(--paper); }
 
-.message { margin: 0; min-height: 18px; font-size: 13px; color: var(--muted); text-align: center; }
-
-/* result */
-.result {
-  padding: 16px;
+/* Qualities: the symbol as a player would write it, with its name underneath. */
+.qualities {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 8px;
+}
+.quality {
+  background: none;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
+  border-radius: 20px;
+  padding: 7px 8px 8px;
   text-align: center;
+  min-height: 52px;
 }
-.result h2 { margin: 0 0 6px; font-size: 19px; }
-.result p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
-.result-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.quality:hover { border-color: var(--blush); }
+.quality .symbol {
+  display: block;
+  font-family: var(--hand);
+  font-weight: 700;
+  font-size: 19px;
+  line-height: 1.15;
+  color: var(--charcoal);
+}
+.quality .name {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.quality[aria-pressed="true"] { background: var(--charcoal); border-color: var(--charcoal); }
+.quality[aria-pressed="true"] .symbol,
+.quality[aria-pressed="true"] .name { color: var(--cream); }
 
-/* dialogs */
+.dock-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+.dock-foot .legend { display: flex; align-items: center; gap: 7px; }
+.dock-foot .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.swatch.hit { background: var(--sage); }
+.swatch.near { background: var(--gold); }
+.swatch.miss { background: var(--rust); }
+.dock-foot .submit-btn { margin-left: auto; }
+
+/* --- dialogs ------------------------------------------------------------- */
 dialog {
-  max-width: 420px;
-  width: calc(100% - 32px);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel);
+  background: var(--cream);
   color: var(--text);
-  padding: 20px;
+  padding: 0;
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(88dvh, 820px);
+  box-shadow: 0 24px 60px rgba(36, 31, 29, 0.24);
 }
-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
-dialog h2 { margin: 0 0 10px; font-size: 18px; }
-dialog h3 { margin: 18px 0 8px; font-size: 13px; color: var(--muted); }
-dialog p { font-size: 14px; line-height: 1.5; }
-.legend { list-style: none; padding: 0; margin: 12px 0; font-size: 14px; }
-.legend li { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 8px; line-height: 1.45; }
-.swatch { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 4px; margin-top: 2px; }
-.swatch.hit { background: var(--hit); }
-.swatch.near { background: var(--near); }
-.swatch.miss { background: var(--miss); }
-.fine { font-size: 12px; color: var(--muted); }
+dialog::backdrop { background: rgba(36, 31, 29, 0.45); }
 
-.stats-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 22px 26px 0;
+}
+.dialog-head .bar-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--blush-deep);
+}
+.dialog-head .dialog-title {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.1;
+  color: var(--charcoal);
+}
+.close-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+  color: var(--text-soft);
+  line-height: 1;
+}
+.close-btn:hover { color: var(--blush-deep); border-color: var(--blush); }
+
+.dialog-body { padding: 20px 26px 26px; overflow-y: auto; }
+
+.help-lede {
+  font-family: var(--script);
+  font-style: italic;
+  color: var(--blush-deep);
+  font-size: 16px;
+  line-height: 1.45;
+  margin: 0 0 16px;
+  max-width: 60ch;
+}
+.help-list { list-style: none; margin: 0; padding: 0; }
+.help-list li { font-size: 14.5px; line-height: 1.55; color: var(--text-soft); max-width: 60ch; }
+.help-list li + li { margin-top: 14px; }
+.help-list b { display: block; color: var(--charcoal); font-weight: 600; }
+.help-list i { font-style: italic; color: var(--charcoal); }
+.help-list .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 8px;
+}
+.help-list li.fine { font-size: 12.5px; }
+.fine { font-size: 12.5px; color: var(--text-soft); }
+
+.stats-scope {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-soft);
+  margin: 0 0 16px;
+}
+.stats-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
 .stats-summary div { display: flex; flex-direction: column; gap: 2px; }
-.stats-summary strong { font-size: 21px; }
-.stats-summary span { font-size: 11px; color: var(--muted); }
+.stats-summary strong { font-family: var(--serif); font-weight: 600; font-size: 24px; color: var(--charcoal); }
+.stats-summary span {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-soft);
+}
+.subhead {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--charcoal);
+  margin: 24px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
 .dist { display: flex; flex-direction: column; gap: 5px; }
-.dist-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.dist-row > span { width: 12px; color: var(--muted); }
+.dist-row { display: flex; align-items: center; gap: 9px; font-size: 12px; }
+.dist-row > span { width: 12px; color: var(--text-soft); }
 .bar {
-  background: var(--accent);
-  color: #fff;
-  border-radius: 5px;
-  padding: 3px 7px;
+  background: var(--blush-deep);
+  color: var(--paper);
+  border-radius: 1px;
+  padding: 3px 8px;
   font-size: 11px;
   text-align: right;
-  min-width: 24px;
+  min-width: 26px;
+  transition: width 200ms ease;
 }
-.weak { font-size: 13px; }
-.stats-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
+/* A reading of a habit, set like a finding: a 2px left rule in the colour of
+   its kind. Gold, because it is a suggestion rather than a fault. */
+.weak {
+  font-size: 13.5px;
+  color: var(--text);
+  border-left: 2px solid var(--gold);
+  padding-left: 10px;
+  margin: 18px 0 0;
+  max-width: 62ch;
+}
+.dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 20px; }
 
-.foot { text-align: center; padding: 0 16px 28px; font-size: 12px; color: var(--muted); }
+.submit-btn {
+  background: var(--charcoal);
+  color: var(--cream);
+  border: 1px solid var(--charcoal);
+  border-radius: 1px;
+  padding: 10px 20px;
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+}
+.submit-btn:hover:not(:disabled) { background: var(--blush-deep); border-color: var(--blush-deep); }
+.submit-btn:disabled { opacity: 0.35; cursor: default; }
 
-@media (max-width: 420px) {
-  .chip-grid { grid-template-columns: repeat(3, 1fr); }
-  .chip-grid.roots { grid-template-columns: repeat(4, 1fr); }
+/* --- colophon ------------------------------------------------------------ */
+.colophon {
+  color: var(--text-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  padding: 0 24px 28px;
+  max-width: var(--max);
+  margin: 0 auto;
+}
+.colophon code { font-family: var(--mono); font-size: 12px; color: var(--charcoal); }
+.colophon a { color: var(--blush-deep); text-decoration: none; border-bottom: 1px solid var(--line); }
+.colophon a:hover { border-bottom-color: var(--blush-deep); }
+
+/* One breakpoint. Below it the head centres, the sheet loosens, and the
+   dialogs become bottom sheets. */
+@media (max-width: 760px) {
+  .wrap, .colophon { padding-inline: 16px; }
+  .top-bar { justify-content: center; }
+  .sheet-head { justify-content: center; text-align: center; }
+  .top-bar-right { justify-content: center; }
+  .setup { justify-content: center; }
+  .plays { margin-left: 0; width: 100%; }
+  .keyboard { height: 96px; }
+  .cell { min-height: 46px; }
+  .qualities { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+  .dock-foot .submit-btn { margin-left: 0; width: 100%; }
+
+  dialog {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 94dvh;
+    margin: 0;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    top: auto;
+    transform: none;
+  }
+  .dialog-head { padding: 16px 18px 0; }
+  .dialog-body { padding: 14px 18px 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
 }

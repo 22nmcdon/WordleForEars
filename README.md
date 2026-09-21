@@ -55,17 +55,40 @@ of the answer's three notes — which is the proximity feedback the plan asks fo
 - Guitar and synth-pad timbres — the instrument toggle is present but disabled.
 - Any server, account, or cross-device sync. Stats live in `localStorage`.
 
+## The look
+
+It follows `BRANDING.md`: a Real Book page that answers back. Cream paper, charcoal ink,
+blush and gold accents, Playfair / Cormorant / Jost — and the chord symbols hand-lettered
+in Kalam, because they are the one thing on the page a player would have written.
+
+- **The five meaning colours do not move between modes.** Sage is "in the chord, in that
+  slot", gold is "in the chord, somewhere else", rust is "outside the chord". Outside is
+  where a note sits, not a mark against you — nothing here calls a player wrong.
+- **Practice is the same page in a different light.** `body.practice` redefines the
+  palette tokens and nothing else: paper drops a stop and goes cooler, the rose accent
+  becomes slate. No component knows the page changed colour.
+- **Three radii, each meaning something.** `1px` is paper (inputs, filled buttons), a pill
+  is a state you are in (the mode switch, the puzzle chip), `50%` is a dot (the help `?`).
+- **The roots are a keyboard, not a list of chips.** Picking a root is a key, which is the
+  gesture the ear is already making.
+- **Webfonts never block rendering.** The `<link>` carries `data-href` and is promoted by
+  script only when the page is served; every family has a real fallback, so the page reads
+  the same offline in the fallback faces.
+
+Checked at 430px as well as 1280px, and with the webfonts both loaded and blocked.
+
 ## Layout
 
 ```
 index.html        shell and markup
-styles.css        styling, dark and light
+styles.css        the design system, as tokens and components
 src/theory.js     pitch classes, qualities, tiers, voicings
 src/audio.js      Web Audio piano synth
 src/random.js     seeded PRNG + daily/puzzle numbering
 src/game.js       scoring and game state (pure, no DOM)
 src/stats.js      localStorage persistence
 src/share.js      emoji result grid
+src/engrave.js    chord symbols written the way a chart writes them
 src/main.js       DOM wiring
 tests/            node:test coverage of the logic above
 ```

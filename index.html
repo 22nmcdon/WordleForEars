@@ -4,120 +4,178 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Harmonle — ear-training Wordle</title>
-<meta name="description" content="A Wordle-style ear-training game: hear a chord, guess its root and quality." />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🎧</text></svg>" />
+<meta name="description" content="Hear a chord, name its root and quality. Six guesses, Wordle-style colours." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='13'>&#9834;</text></svg>" />
+<!-- The webfonts are requested by script rather than written here with an href,
+     and only when this page is served over the web. A stylesheet still on its
+     way stops every script after it, and a page waiting on a font it will never
+     receive paints no text at all - an invisible interface is far worse than
+     one in the fallback faces. Every family has a real fallback in the stack. -->
+<link id="webfonts"
+      data-href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&family=Jost:wght@300;400;500;600&family=Kalam:wght@700&display=swap">
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <span class="logo" aria-hidden="true">🎧</span>
-    <div>
-      <h1>Harmonle</h1>
-      <p class="tagline">Ear-training Wordle — Chords</p>
-    </div>
-  </div>
-  <div class="topbar-actions">
-    <button id="help-btn" class="icon-btn" type="button" aria-label="How to play">?</button>
-    <button id="stats-btn" class="icon-btn" type="button" aria-label="Statistics">📊</button>
-  </div>
-</header>
 
-<main>
-  <section class="controls" aria-label="Game setup">
-    <div class="seg" role="group" aria-label="Mode">
-      <button class="seg-btn is-active" data-mode="daily" type="button">Daily</button>
-      <button class="seg-btn" data-mode="practice" type="button">Practice</button>
+<div class="wrap">
+  <header class="top-bar">
+    <!-- A chart's own head, engraved along a line: feel, title, credit. -->
+    <div class="sheet-head">
+      <span class="style-mark">Ear training</span>
+      <h1 class="sheet-title">Harmonle</h1>
+      <span class="sheet-credit">chords, by ear</span>
     </div>
-    <label class="field">
-      <span>Difficulty</span>
-      <select id="tier"></select>
-    </label>
-    <label class="field">
-      <span>Voicing</span>
-      <select id="voicing"></select>
-    </label>
-    <label class="field field-check">
-      <input id="instrument" type="checkbox" checked disabled />
-      <span>Piano <em>(more timbres later)</em></span>
-    </label>
-  </section>
 
-  <p id="puzzle-label" class="puzzle-label"></p>
-
-  <section class="player" aria-label="Audio clue">
-    <button id="play" class="play-btn" type="button">
-      <span class="play-icon" aria-hidden="true">▶</span>
-      <span>Play chord</span>
-    </button>
-    <div class="player-side">
-      <button id="arp" class="ghost-btn" type="button">Arpeggiate</button>
-      <button id="ref" class="ghost-btn" type="button">Reference C</button>
+    <div class="top-bar-right">
+      <!-- A state you are in, not an action, so: a pill. Nothing is torn down
+           when it flips - the same chart, in a different light. -->
+      <div class="mode-switch" role="radiogroup" aria-label="What you are playing">
+        <button class="mode-option" type="button" data-mode="daily" role="radio" aria-checked="true">Daily</button>
+        <button class="mode-option" type="button" data-mode="practice" role="radio" aria-checked="false">Practice</button>
+      </div>
+      <div class="status" id="puzzleStatus" data-state="playing">Daily</div>
+      <!-- Grouped so the "?" never wraps onto a line of its own at a phone
+           width, which reads as a control that fell off the row. -->
+      <div class="tools">
+        <button class="link-btn" type="button" id="stats-btn">Stats</button>
+        <button class="help-button" type="button" id="help-btn" aria-label="How this works" title="How this works">?</button>
+      </div>
     </div>
-  </section>
 
-  <section class="board-wrap" aria-label="Guesses">
-    <div class="board-head">
-      <span>Root</span><span>Quality</span><span>Notes</span>
+    <div class="setup">
+      <label class="field">
+        <span class="field-label">Difficulty</span>
+        <select id="tier"></select>
+      </label>
+      <label class="field">
+        <span class="field-label">Voicing</span>
+        <select id="voicing"></select>
+      </label>
+      <span class="instrument">Piano <em>— guitar and pad later</em></span>
     </div>
-    <div id="board" class="board"></div>
-  </section>
+  </header>
+</div>
 
-  <section id="picker" class="picker" aria-label="Your guess">
-    <div class="picker-group">
-      <h2>Root</h2>
-      <div id="roots" class="chip-grid roots"></div>
-    </div>
-    <div class="picker-group">
-      <h2>Quality</h2>
-      <div id="qualities" class="chip-grid"></div>
-    </div>
-    <button id="submit" class="submit-btn" type="button" disabled>Submit guess</button>
-    <p id="message" class="message" role="status" aria-live="polite"></p>
-  </section>
+<main class="wrap">
+  <section class="sheet-section">
+    <div class="sheet">
+      <p class="lede" id="lede">Hear a chord and name what it is — the root, then the quality.
+        Six guesses, and every one of them tells you something.</p>
 
-  <section id="result" class="result" hidden>
-    <h2 id="result-title"></h2>
-    <p id="result-body"></p>
-    <div class="result-actions">
-      <button id="share" class="submit-btn" type="button">Share result</button>
-      <button id="again" class="ghost-btn" type="button">New practice chord</button>
+      <div class="clue">
+        <button class="play-btn" type="button" id="play">Play chord</button>
+        <button class="link-btn" type="button" id="arp">Arpeggiate</button>
+        <button class="link-btn" type="button" id="ref">Reference C</button>
+        <span class="plays" id="plays"></span>
+      </div>
+
+      <div class="board-head"><span>Root</span><span>Quality</span><span>Notes</span></div>
+      <div class="board" id="board"></div>
     </div>
   </section>
 </main>
 
+<div class="dock" id="dock">
+  <div class="wrap">
+    <div class="feedback">
+      <span class="verdict" id="verdict">Play the chord, then name it.</span>
+      <span class="played" id="played"></span>
+      <button class="link-btn" type="button" id="share" hidden>Copy result</button>
+      <button class="link-btn" type="button" id="again" hidden>New chord</button>
+    </div>
+
+    <div class="picker" id="picker">
+      <div class="picker-group">
+        <p class="eyebrow">Root</p>
+        <div class="keyboard" id="roots" role="group" aria-label="Root"></div>
+      </div>
+      <div class="picker-group">
+        <p class="eyebrow">Quality</p>
+        <div class="qualities" id="qualities" role="group" aria-label="Quality"></div>
+      </div>
+    </div>
+
+    <div class="dock-foot">
+      <span class="legend"><span class="swatch hit"></span> in the chord, in that slot</span>
+      <span class="legend"><span class="swatch near"></span> in the chord, elsewhere</span>
+      <span class="legend"><span class="swatch miss"></span> outside the chord</span>
+      <button class="submit-btn" type="button" id="submit" disabled>Submit guess</button>
+    </div>
+  </div>
+</div>
+
+<div class="colophon">
+  <span>Proof of concept · chords mode.</span>
+  <span>Synthesised live in <code>src/audio.js</code> — no samples.</span>
+  <span>EQ, intervals and rhythm come next.</span>
+</div>
+
 <dialog id="help">
-  <h2>How to play</h2>
-  <p>Press <strong>Play chord</strong> and listen. Pick the <strong>root</strong> and the
-  <strong>quality</strong> you think you heard, then submit. You get six guesses.</p>
-  <ul class="legend">
-    <li><span class="swatch hit"></span> <strong>Green</strong> — exactly right.</li>
-    <li><span class="swatch near"></span> <strong>Yellow</strong> — close: the note you picked is
-      in the chord but isn't the root, or the quality you picked shares structure with the answer.</li>
-    <li><span class="swatch miss"></span> <strong>Grey</strong> — not in the chord at all.</li>
-  </ul>
-  <p>The third column scores your whole guess: how many of the answer's notes your chord
-  actually contains.</p>
-  <p class="fine">Everything is stored locally in your browser. No account, no server.</p>
-  <form method="dialog"><button class="submit-btn" type="submit">Got it</button></form>
+  <div class="dialog-head">
+    <div>
+      <div class="bar-label">Chord practice</div>
+      <div class="dialog-title">How this works</div>
+    </div>
+    <button class="close-btn" type="button" id="help-close" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="dialog-body">
+    <p class="help-lede">A chord is played. You name its root and its quality — and each guess
+      says where what you picked actually sits.</p>
+
+    <ul class="help-list">
+      <li><b>Play the chord, then name it.</b>
+        <span><i>Arpeggiate</i> spreads it out one note at a time; <i>Reference C</i> gives you
+        middle C to orient by. Play it as many times as you like.</span></li>
+
+      <li><b><span class="swatch hit"></span>In the chord, in that slot.</b>
+        <span>The root you picked is the chord's root, or the quality is the one being played.</span></li>
+
+      <li><b><span class="swatch near"></span>In the chord, somewhere else.</b>
+        <span>The note you picked is in the chord but is not its root; or the quality you picked
+        shares an interval with the one being played.</span></li>
+
+      <li><b><span class="swatch miss"></span>Outside the chord.</b>
+        <span>Not there at all. Not a mark against you: it is where the note sits.</span></li>
+
+      <li><b>The third column reads the whole guess.</b>
+        <span><i>2/3</i> means the chord you named contains two of the three notes you heard.</span></li>
+
+      <li><b>The daily is the same chord for everyone,</b>
+        <span>seeded from the date. Practice is unlimited, and runs in a cooler light so you
+        always know which one you are in.</span></li>
+
+      <li class="fine">Everything is kept in this browser. No account, no server.</li>
+    </ul>
+
+    <div class="dialog-actions">
+      <span></span>
+      <button class="submit-btn" type="button" id="help-ok">Got it</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="stats">
-  <h2>Statistics</h2>
-  <p id="stats-scope" class="fine"></p>
-  <div id="stats-summary" class="stats-summary"></div>
-  <h3>Guess distribution</h3>
-  <div id="stats-dist" class="dist"></div>
-  <p id="stats-weak" class="weak"></p>
-  <form method="dialog" class="stats-actions">
-    <button id="reset-stats" class="ghost-btn" type="button">Reset stats</button>
-    <button class="submit-btn" type="submit">Close</button>
-  </form>
-</dialog>
+  <div class="dialog-head">
+    <div>
+      <div class="bar-label">Chords</div>
+      <div class="dialog-title">What you have played</div>
+    </div>
+    <button class="close-btn" type="button" id="stats-close" aria-label="Close">&times;</button>
+  </div>
 
-<footer class="foot">
-  <p>Proof of concept · Chords mode. EQ, intervals and rhythm modes come next.</p>
-</footer>
+  <div class="dialog-body">
+    <p class="stats-scope" id="stats-scope"></p>
+    <div class="stats-summary" id="stats-summary"></div>
+    <h3 class="subhead">Guesses it took</h3>
+    <div class="dist" id="stats-dist"></div>
+    <p class="weak" id="stats-weak"></p>
+    <div class="dialog-actions">
+      <button class="link-btn" type="button" id="reset-stats">Reset</button>
+      <button class="submit-btn" type="button" id="stats-ok">Close</button>
+    </div>
+  </div>
+</dialog>
 
 <script type="module" src="src/main.js"></script>
 </body>
