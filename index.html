@@ -20,10 +20,12 @@
 <div class="wrap">
   <header class="top-bar">
     <!-- A chart's own head, engraved along a line: feel, title, credit. -->
+    <!-- A chart's own head: what is being played, what it is called, what it
+         is. The feel changes with the mode, the way it would on a stand. -->
     <div class="sheet-head">
-      <span class="style-mark">Ear training</span>
+      <span class="style-mark" id="modeMark">Chords</span>
       <h1 class="sheet-title">Harmonle</h1>
-      <span class="sheet-credit">chords, by ear</span>
+      <span class="sheet-credit" id="modeBlurb">what kind of chord is that</span>
     </div>
 
     <div class="top-bar-right">
@@ -44,14 +46,17 @@
 
     <div class="setup">
       <label class="field">
+        <span class="field-label">Training</span>
+        <select id="mode"></select>
+      </label>
+      <label class="field">
         <span class="field-label">Difficulty</span>
         <select id="tier"></select>
       </label>
-      <label class="field">
-        <span class="field-label">Voicing</span>
-        <select id="voicing"></select>
+      <label class="field" id="settingField">
+        <span class="field-label" id="settingLabel">Voicing</span>
+        <select id="setting"></select>
       </label>
-      <span class="instrument">Piano <em>— guitar and pad later</em></span>
     </div>
   </header>
 </div>
@@ -59,17 +64,11 @@
 <main class="wrap">
   <section class="sheet-section">
     <div class="sheet">
-      <p class="lede" id="lede">Hear a chord and name what it is — major, minor, half-diminished.
-        Not what note it starts on: what kind of chord it is.</p>
+      <p class="lede" id="lede"></p>
+      <p class="advice" id="advice" hidden></p>
 
-      <div class="clue">
-        <button class="play-btn" type="button" id="play">Play chord</button>
-        <button class="link-btn" type="button" id="arp">Arpeggiate</button>
-        <button class="link-btn" type="button" id="ref">Reference C</button>
-        <span class="plays" id="plays"></span>
-      </div>
+      <div class="clue" id="clue"></div>
 
-      <div class="board-head"><span>Quality</span><span>Notes</span></div>
       <div class="board" id="board"></div>
     </div>
   </section>
@@ -84,68 +83,51 @@
       <button class="link-btn" type="button" id="again" hidden>New chord</button>
     </div>
 
-    <div class="picker" id="picker">
-      <div class="picker-group">
-        <p class="eyebrow">What kind of chord is it?</p>
-        <div class="qualities" id="qualities" role="group" aria-label="Chord quality"></div>
-      </div>
-    </div>
+    <!-- One group per thing the mode asks about: a chord has one, an EQ move
+         has two. -->
+    <div class="picker" id="picker"></div>
 
     <div class="dock-foot">
-      <span class="legend"><span class="swatch hit"></span> that is the chord</span>
-      <span class="legend"><span class="swatch near"></span> shares a note</span>
-      <span class="legend"><span class="swatch miss"></span> shares nothing</span>
+      <span class="legend"><span class="swatch hit"></span> that is it</span>
+      <span class="legend"><span class="swatch near"></span> close</span>
+      <span class="legend"><span class="swatch miss"></span> not close</span>
       <button class="submit-btn" type="button" id="submit" disabled>Submit guess</button>
     </div>
   </div>
 </div>
 
 <div class="colophon">
-  <span>Proof of concept · chords mode.</span>
-  <span>Synthesised live in <code>src/audio.js</code> — no samples.</span>
-  <span>EQ, intervals and rhythm come next.</span>
+  <span>Proof of concept · seven modes.</span>
+  <span>Every sound synthesised live in <code>src/audio.js</code> — no samples.</span>
+  <span>Stats stay in this browser.</span>
 </div>
 
 <dialog id="help">
   <div class="dialog-head">
     <div>
-      <div class="bar-label">Chord practice</div>
+      <div class="bar-label" id="helpMode">Chords</div>
       <div class="dialog-title">How this works</div>
     </div>
     <button class="close-btn" type="button" id="help-close" aria-label="Close">&times;</button>
   </div>
 
   <div class="dialog-body">
-    <p class="help-lede">A chord is played. You name what kind of chord it is — and each guess
-      tells you how close what you named sits to what you heard.</p>
+    <p class="help-lede" id="helpLede"></p>
 
+    <ul class="help-list" id="helpList"></ul>
+
+    <h3 class="subhead">The same three colours, everywhere</h3>
     <ul class="help-list">
-      <li><b>Play the chord, then name its quality.</b>
-        <span><i>Arpeggiate</i> spreads it out one note at a time; <i>Reference C</i> gives you
-        middle C to orient by. Play it as many times as you like.</span></li>
-
-      <li><b>The root is not part of it.</b>
-        <span>Every puzzle is rooted somewhere different, so there is nothing to anchor on.
-        Naming the root by ear is absolute pitch — a different skill, and its own mode later.</span></li>
-
-      <li><b><span class="swatch hit"></span>Sage — that is the chord.</b>
-        <span>The quality you named is the one being played.</span></li>
-
-      <li><b><span class="swatch near"></span>Gold — some of it is right.</b>
-        <span>What you named shares a note above the root with what you heard: the right third
-        and the wrong seventh, say.</span></li>
-
-      <li><b><span class="swatch miss"></span>Rust — nothing in common.</b>
-        <span>Not a mark against you: it is how far the two chords sit apart.</span></li>
-
-      <li><b>The second column counts the notes.</b>
-        <span><i>2/3</i> means your chord has two of the three notes above the root that the
-        answer has — which is what narrows the next guess.</span></li>
-
-      <li><b>Three guesses on Easy, four further up.</b>
-        <span>Enough to work it out, not enough to press every button. The daily is the same
-        chord for everyone; practice is unlimited and runs in a cooler light.</span></li>
-
+      <li><b><span class="swatch hit"></span>Sage — that is it.</b>
+        <span>What you named is what was played.</span></li>
+      <li><b><span class="swatch near"></span>Gold — close.</b>
+        <span>The next band along, a semitone out, the right feel and the wrong figure.
+        What "close" means is the mode's own business, and the second column spells it out.</span></li>
+      <li><b><span class="swatch miss"></span>Rust — not close.</b>
+        <span>Never a mark against you: it is how far the two things sit apart.</span></li>
+      <li><b>Seven modes, three tiers each.</b>
+        <span>Every one has its own daily — the same puzzle for everybody, seeded from the date —
+        and unlimited practice, which runs in a cooler light so you always know which you are in.</span></li>
       <li class="fine">Everything is kept in this browser. No account, no server.</li>
     </ul>
 
@@ -159,7 +141,7 @@
 <dialog id="stats">
   <div class="dialog-head">
     <div>
-      <div class="bar-label">Chords</div>
+      <div class="bar-label" id="statsMode">Chords</div>
       <div class="dialog-title">What you have played</div>
     </div>
     <button class="close-btn" type="button" id="stats-close" aria-label="Close">&times;</button>

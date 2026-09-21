@@ -12,19 +12,31 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Dependency order. Two modules read another's values while they are still
-// being evaluated - share.js builds its emoji table out of game.js's tiers -
-// so this is an order, not a list.
+// Dependency order. Several modules read another's values while they are still
+// being evaluated - the registry builds itself out of the seven modes, and the
+// game's guess ceiling out of the registry - so this is an order, not a list.
 const MODULES = [
-  'theory.js', 'random.js', 'engrave.js', 'audio.js',
-  'game.js', 'stats.js', 'share.js', 'main.js',
+  'theory.js', 'random.js', 'engrave.js',
+  'modes/scoring.js',
+  'modes/chords.js', 'modes/pitch.js', 'modes/intervals.js', 'modes/eq.js',
+  'modes/rhythm.js', 'modes/panning.js', 'modes/compression.js',
+  'modes/index.js',
+  'audio.js', 'game.js', 'stats.js', 'share.js', 'main.js',
 ];
 
-/** Strips the module keywords. Every module here exports names and imports
-    names, so once they share one scope the keywords are all that has to go. */
-function flatten(source) {
+/**
+ * Strips the module keywords, so that files written to import and export each
+ * other's names can share one scope instead.
+ *
+ * A default export has no name of its own, so it takes its file's - which is
+ * exactly the name the importing file already uses for it, and is why nothing
+ * in this tree imports anything under an alias.
+ */
+function flatten(source, name) {
   return source
+    .replace(/^export\s*\{[^}]*\}\s*from\s*['"][^'"]+['"];\s*$/gm, '')
     .replace(/^import\s+[\s\S]*?from\s+['"][^'"]+['"];\s*$/gm, '')
+    .replace(/^export\s+default\s+/gm, `const ${name} = `)
     .replace(/^export\s+/gm, '')
     .trim();
 }
@@ -45,9 +57,10 @@ const fonts = /<link id="webfonts"[\s\S]*?>/.exec(page)[0];
 const title = 'Harmonle';
 
 const code = [];
-for (const name of MODULES) {
-  const source = await readFile(join(root, 'src', name), 'utf8');
-  code.push(`/* ---- src/${name} ---- */\n${flatten(source)}`);
+for (const path of MODULES) {
+  const source = await readFile(join(root, 'src', path), 'utf8');
+  const name = path.split('/').pop().replace(/\.js$/, '');
+  code.push(`/* ---- src/${path} ---- */\n${flatten(source, name)}`);
 }
 
 // One scope, so the bundle cannot leak names into the host page.
