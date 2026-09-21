@@ -1,9 +1,10 @@
-import { BAND_TYPES, curveOf, logFrequencies, shortHz } from './filters.js';
+import { BAND_TYPES, bandGainAt, contributionOf, curveOf, logFrequencies, shortHz } from './filters.js';
 import { EQPlayer } from './player.js';
 
 const LOW = 20;
 const HIGH = 20000;
 const RANGE = 18; // decibels shown above and below the line
+const MOST_RESONANCE = 15;
 
 const toX = (hz, width) => (Math.log2(hz / LOW) / Math.log2(HIGH / LOW)) * width;
 const toHz = (x, width) => LOW * (HIGH / LOW) ** (x / width);
@@ -125,10 +126,16 @@ export class EQPlugin {
                value="${band.gain}" aria-label="Gain">
       </div>
       <div class="knob" ${type.q ? '' : 'hidden'}>
-        <label class="knob-name" for="eqQ">${band.type === 'peaking' ? 'Q' : 'Resonance'}</label>
+        <label class="knob-name" for="eqQ">Q</label>
         <output class="knob-value" id="eqQValue">${band.q.toFixed(2)}</output>
         <input class="knob-dial" type="range" id="eqQ" min="${Math.log2(0.4)}" max="${Math.log2(12)}"
-               step="0.01" value="${Math.log2(band.q)}" aria-label="Q">
+               step="0.01" value="${Math.log2(Math.max(0.4, band.q))}" aria-label="Q">
+      </div>
+      <div class="knob" ${type.resonance ? '' : 'hidden'}>
+        <label class="knob-name" for="eqRes">Resonance</label>
+        <output class="knob-value" id="eqResValue">${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB</output>
+        <input class="knob-dial" type="range" id="eqRes" min="-${RANGE}" max="${MOST_RESONANCE}" step="0.1"
+               value="${band.q}" aria-label="Resonance">
       </div>`;
   }
 
@@ -155,6 +162,7 @@ export class EQPlugin {
       if (e.target.id === 'eqFreq') band.frequency = 2 ** Number(e.target.value);
       if (e.target.id === 'eqGain') band.gain = Number(e.target.value);
       if (e.target.id === 'eqQ') band.q = 2 ** Number(e.target.value);
+      if (e.target.id === 'eqRes') band.q = Number(e.target.value);
       band.on = true;
       this.changed({ keepControls: true });
     });
@@ -193,12 +201,21 @@ export class EQPlugin {
     window.addEventListener('resize', this.resize);
   }
 
+  /** Where the whole curve sits at one frequency - where a handle belongs. */
+  curveAt(hz) {
+    return curveOf(this.bands, [hz], this.rate())[0];
+  }
+
+  rate() {
+    return this.engine.ctx?.sampleRate ?? 48000;
+  }
+
   /** Which node the pointer is on, if any. */
   nodeAt(x, y) {
     const { width, height } = this.size();
     return this.bands.findIndex((band) => {
       const bandX = toX(band.frequency, width);
-      const bandY = toY(BAND_TYPES[band.type].gain ? band.gain : 0, height);
+      const bandY = toY(this.curveAt(band.frequency), height);
       return Math.hypot(bandX - x, bandY - y) < 22;
     });
   }
@@ -227,9 +244,7 @@ export class EQPlugin {
     const { width, height } = this.size();
     const band = this.bands[this.dragging];
     band.frequency = Math.min(HIGH, Math.max(LOW, toHz(x, width)));
-    if (BAND_TYPES[band.type].gain) {
-      band.gain = Math.max(-RANGE, Math.min(RANGE, toDb(y, height)));
-    }
+    this.pull(band, toDb(y, height));
     this.changed();
   }
 
@@ -239,7 +254,30 @@ export class EQPlugin {
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* gone already */ }
   }
 
-  /** The wheel is the Q, which is what it does in every EQ worth using. */
+  /**
+   * Drags the curve to the pointer by moving whatever that band controls.
+   *
+   * Solved rather than assigned, because the handle is on the composite curve:
+   * what has to land under the pointer is the sum of every band at this
+   * frequency, so the one being dragged takes the difference. A shelf takes
+   * twice it, since it is only halfway up at its corner, and a cut takes it as
+   * resonance - which is the fix for dragging a high-pass up and down like
+   * everything else, instead of reaching for the wheel.
+   */
+  pull(band, wanted) {
+    const type = BAND_TYPES[band.type];
+    const others = this.curveAt(band.frequency) - contributionOf(band, this.rate());
+    const mine = wanted - others;
+
+    if (type.gain) {
+      band.gain = Math.max(-RANGE, Math.min(RANGE, mine / type.contributes));
+    } else if (type.resonance) {
+      band.q = Math.max(-RANGE, Math.min(MOST_RESONANCE, mine));
+    }
+  }
+
+  /** The wheel is the Q of a peak, which is what it does in every EQ worth
+      using. A cut has no Q to speak of - its handle is the resonance. */
   wheel(e) {
     if (!this.interactive) return;
     const { x, y } = this.at(e);
@@ -278,6 +316,7 @@ export class EQPlugin {
     set('#eqFreqValue', `${shortHz(band.frequency)} Hz`);
     set('#eqGainValue', `${band.gain.toFixed(1)} dB`);
     set('#eqQValue', band.q.toFixed(2));
+    set('#eqResValue', `${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB`);
   }
 
   async toggle() {
@@ -394,7 +433,7 @@ export class EQPlugin {
   drawCurve(c, width, height, bands, colour, weight, dash = []) {
     const points = Math.max(160, Math.round(width / 2));
     const frequencies = logFrequencies(points, LOW, HIGH);
-    const curve = curveOf(bands, frequencies, this.engine.ctx?.sampleRate ?? 48000);
+    const curve = curveOf(bands, frequencies, this.rate());
 
     c.beginPath();
     for (let i = 0; i < points; i += 1) {
@@ -415,7 +454,7 @@ export class EQPlugin {
     this.bands.forEach((band, i) => {
       const type = BAND_TYPES[band.type];
       const x = toX(band.frequency, width);
-      const y = toY(type.gain ? band.gain : 0, height);
+      const y = toY(this.curveAt(band.frequency), height);
       const chosen = i === this.selected;
 
       c.beginPath();
@@ -441,6 +480,7 @@ export class EQPlugin {
     const parts = [type.label, `${shortHz(band.frequency)} Hz`];
     if (type.gain) parts.push(`${band.gain > 0 ? '+' : ''}${band.gain.toFixed(1)} dB`);
     if (type.q) parts.push(`Q ${band.q.toFixed(2)}`);
+    if (type.resonance) parts.push(`res ${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB`);
     this.readout.textContent = band.on ? parts.join(' · ') : `${type.label} · off`;
   }
 

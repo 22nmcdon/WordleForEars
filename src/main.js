@@ -333,7 +333,8 @@ function startGame({ fresh = false } = {}) {
   }
 
   render();
-  say(`Play it, then name what you heard.`);
+  // A mode with its own interface is not answered by naming anything.
+  say(mode().opening ?? 'Play it, then name what you heard.');
 }
 
 function say(text, { matched = false } = {}) {

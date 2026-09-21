@@ -7,22 +7,37 @@
 // one is checked against `BiquadFilterNode.getFrequencyResponse` to a
 // hundredth of a decibel.
 
+/**
+ * What each kind of band has, and what its handle means vertically.
+ *
+ * Every type contributes something known at its own corner frequency, which is
+ * what lets the handle sit on the curve rather than beside it:
+ *
+ *   peak     its gain, exactly
+ *   shelf    half its gain - a shelf is halfway up at its corner
+ *   HP / LP  its resonance, exactly, because Web Audio states that in decibels
+ *
+ * So dragging a handle up and down is the same gesture on all five: it sets
+ * whichever number that band contributes there.
+ */
 export const BAND_TYPES = {
-  highpass: { label: 'High-pass', short: 'HP', gain: false, q: true },
-  lowshelf: { label: 'Low shelf', short: 'LS', gain: true, q: false },
-  peaking: { label: 'Peak', short: 'PK', gain: true, q: true },
-  highshelf: { label: 'High shelf', short: 'HS', gain: true, q: false },
-  lowpass: { label: 'Low-pass', short: 'LP', gain: false, q: true },
+  highpass: { label: 'High-pass', short: 'HP', gain: false, resonance: true, contributes: 1 },
+  lowshelf: { label: 'Low shelf', short: 'LS', gain: true, contributes: 0.5 },
+  peaking: { label: 'Peak', short: 'PK', gain: true, q: true, contributes: 1 },
+  highshelf: { label: 'High shelf', short: 'HS', gain: true, contributes: 0.5 },
+  lowpass: { label: 'Low-pass', short: 'LP', gain: false, resonance: true, contributes: 1 },
 };
 
 /** The channel strip, in the order an engineer reads it: low to high. */
 export const STRIP = [
-  { id: 'hp', type: 'highpass', frequency: 40, gain: 0, q: 0.7 },
+  // The cuts start at -3, which is a flat corner: in Web Audio's decibels that
+  // is the maximally flat filter every desk calls Butterworth.
+  { id: 'hp', type: 'highpass', frequency: 40, gain: 0, q: -3 },
   { id: 'ls', type: 'lowshelf', frequency: 120, gain: 0, q: 0.7 },
   { id: 'p1', type: 'peaking', frequency: 400, gain: 0, q: 1.4 },
   { id: 'p2', type: 'peaking', frequency: 2000, gain: 0, q: 1.4 },
   { id: 'hs', type: 'highshelf', frequency: 8000, gain: 0, q: 0.7 },
-  { id: 'lp', type: 'lowpass', frequency: 18000, gain: 0, q: 0.7 },
+  { id: 'lp', type: 'lowpass', frequency: 18000, gain: 0, q: -3 },
 ];
 
 export const newStrip = () => STRIP.map((band) => ({ ...band, on: false }));
@@ -98,6 +113,12 @@ export function bandGainAt(band, frequency, rate) {
 }
 
 /** The whole strip's curve: what the bands come to, band by band, in dB. */
+/** What one band adds at its own corner - the height its handle sits at. */
+export function contributionOf(band, rate = 48000) {
+  if (band.on === false) return 0;
+  return bandGainAt(band, band.frequency, rate);
+}
+
 export function curveOf(bands, frequencies, rate = 48000) {
   const curve = new Float64Array(frequencies.length);
 

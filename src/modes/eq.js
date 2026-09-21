@@ -38,6 +38,7 @@ export default {
   surface: true,
   lede: 'A channel EQ, and a loop running through it. Drag the bands until '
       + 'yours sounds like the target — or until the problem in the sample is gone.',
+  opening: 'Play the loop, shape the EQ, then lock it in.',
 
   settings: [
     {
