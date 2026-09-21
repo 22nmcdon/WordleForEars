@@ -73,7 +73,7 @@ export function dialled(guess, answer, spec) {
 export const logPick = (rng, low, high) => low * (high / low) ** rng();
 
 /** Rounded to a step, so an answer is a number a person could have dialled. */
-export const toStep = (value, step) => Math.round(value / step) * step;
+export const toStep = (value, step) => Number((Math.round(value / step) * step).toFixed(6));
 
 /** Frequencies land on the third-octave grid an engineer actually works on. */
 export function toThirdOctave(hz) {

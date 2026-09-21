@@ -1,10 +1,18 @@
 import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
 
-/** The answer, as a guess: every slot set to what the puzzle actually is. */
-export const answerAsGuess = (puzzle) => Object.fromEntries(
-  modeOf(puzzle.mode).slots(puzzle.tier, puzzle.settings)
-    .map((slot) => [slot.id, puzzle.answer[slot.id]]),
-);
+/**
+ * The answer, as a guess.
+ *
+ * A mode with its own interface hands back whatever that interface builds -
+ * for the EQ, a set of bands - so the answer is already in that shape and is
+ * its own perfect guess.
+ */
+export const answerAsGuess = (puzzle) => (modeOf(puzzle.mode).surface
+  ? puzzle.answer
+  : Object.fromEntries(
+    modeOf(puzzle.mode).slots(puzzle.tier, puzzle.settings)
+      .map((slot) => [slot.id, puzzle.answer[slot.id]]),
+  ));
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
@@ -19,7 +27,17 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
  * rejects as a guess already tried.
  */
 export function wrongGuess(puzzle, nth = 0) {
-  const slots = modeOf(puzzle.mode).slots(puzzle.tier, puzzle.settings);
+  const spec = modeOf(puzzle.mode);
+
+  // Nothing dialled at all, then a band in the wrong place - both a long way
+  // from any target this mode sets.
+  if (spec.surface) {
+    return nth === 0 ? [] : [{
+      type: 'peaking', frequency: 60 * (nth + 1), gain: 12, q: 1 + nth, on: true,
+    }];
+  }
+
+  const slots = spec.slots(puzzle.tier, puzzle.settings);
 
   const dialled = slots.filter((slot) => slot.kind === 'range');
   if (dialled.length) {

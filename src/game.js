@@ -112,5 +112,5 @@ export function submitGuess(game, guess) {
 
 /** What the answer was, for the reveal line. */
 export function reveal(puzzle) {
-  return modeOf(puzzle.mode).reveal(puzzle.answer, puzzle.tier);
+  return modeOf(puzzle.mode).reveal(puzzle.answer, puzzle.tier, puzzle);
 }

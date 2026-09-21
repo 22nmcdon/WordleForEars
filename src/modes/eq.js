@@ -1,9 +1,6 @@
-import { dialled, logPick, toStep, toThirdOctave, pick } from './scoring.js';
-
-/** Hertz, written the way a plugin writes it. */
-export function writeHz(hz) {
-  return hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)} kHz` : `${Math.round(hz)} Hz`;
-}
+import { newStrip, curveOf, logFrequencies, writeHz } from '../eq/filters.js';
+import { EQPlugin } from '../eq/plugin.js';
+import { HIT, NEAR, MISS, logPick, toStep, toThirdOctave, pick } from './scoring.js';
 
 const writeDb = (db) => `${db > 0 ? '+' : ''}${db.toFixed(1).replace(/\.0$/, '')} dB`;
 
@@ -15,18 +12,32 @@ const TROUBLE = [
   { low: 3000, high: 6500, name: 'harshness' },
 ];
 
-const BAND_TOLERANCE = {
-  easy: { frequency: { hit: 0.5, near: 1.5 }, gain: { hit: 2, near: 5 }, q: { hit: 0.6, near: 1.4 } },
-  medium: { frequency: { hit: 0.35, near: 1 }, gain: { hit: 1.5, near: 3.5 }, q: { hit: 0.5, near: 1.2 } },
-  hard: { frequency: { hit: 0.25, near: 0.7 }, gain: { hit: 1, near: 2.5 }, q: { hit: 0.4, near: 1 } },
-};
+/**
+ * The frequencies a curve is judged on: where the ear is, at the spacing the
+ * ear hears. Below 30 and above 16k there is little to hear and a great deal
+ * of room to be wrong in, which would flatter or punish a guess for nothing.
+ */
+const JUDGED = logFrequencies(96, 30, 16000);
+
+/**
+ * How far the two curves may part company, at their worst point, and still
+ * count as matched.
+ *
+ * The worst point rather than the average: averaged across the spectrum, a
+ * single band is a small part of a wide range, so doing nothing at all scored
+ * about two decibels and very nearly passed. What "matched" means to anyone
+ * looking at two curves is that they sit on each other everywhere, which is
+ * exactly what the largest gap between them measures.
+ */
+const CLOSE_ENOUGH = { easy: 2.5, medium: 1.8, hard: 1.2 };
 
 export default {
   id: 'eq',
   label: 'EQ',
-  blurb: 'Dial the move in',
-  lede: 'Not multiple choice: the EQ is yours to dial. Move the band until '
-      + 'yours sits on the target — or until the problem in the sample goes away.',
+  blurb: 'Shape it until it matches',
+  surface: true,
+  lede: 'A channel EQ, and a loop running through it. Drag the bands until '
+      + 'yours sounds like the target — or until the problem in the sample is gone.',
 
   settings: [
     {
@@ -37,157 +48,146 @@ export default {
         { id: 'fix', label: 'Fix the sample' },
       ],
     },
-    {
-      id: 'source',
-      label: 'Source',
-      options: [
-        { id: 'mix', label: 'Full mix' },
-        { id: 'instrument', label: 'One instrument' },
-      ],
-    },
   ],
 
   tiers: {
-    easy: { label: 'Easy', blurb: 'Wide and obvious', guesses: 4, q: false, extreme: [7, 11] },
-    medium: { label: 'Medium', blurb: 'Narrower, and the Q is yours too', guesses: 4, q: true, extreme: [4, 7] },
-    hard: { label: 'Hard', blurb: 'Surgical, and barely there', guesses: 4, q: true, extreme: [2, 4] },
+    easy: { label: 'Easy', blurb: 'One band, and a big move', guesses: 4, bands: 1, size: [7, 11] },
+    medium: { label: 'Medium', blurb: 'Two bands', guesses: 4, bands: 2, size: [4, 8] },
+    hard: { label: 'Hard', blurb: 'Three bands, and subtle', guesses: 4, bands: 3, size: [2.5, 5] },
   },
 
-  slots(tier) {
-    const tolerance = BAND_TOLERANCE[tier];
-    const slots = [
-      {
-        kind: 'range',
-        id: 'frequency',
-        heading: 'frequency',
-        label: 'Where is it?',
-        min: 50, max: 12000, log: true, start: 1000,
-        format: writeHz,
-        unit: 'oct', below: 'low', above: 'high',
-        ...tolerance.frequency,
-      },
-      {
-        kind: 'range',
-        id: 'gain',
-        heading: 'gain',
-        label: 'How much, and which way?',
-        min: -12, max: 12, step: 0.5, start: 0,
-        format: writeDb,
-        unit: 'dB', decimals: 1, below: 'shy', above: 'hot',
-        ...tolerance.gain,
-      },
-    ];
-
-    if (this.tiers[tier].q) {
-      slots.push({
-        kind: 'range',
-        id: 'q',
-        heading: 'Q',
-        narrowReading: true,
-        label: 'How wide?',
-        min: 0.5, max: 8, log: true, start: 1.4,
-        format: (q) => `Q ${q.toFixed(1)}`,
-        unit: 'x', below: 'wide', above: 'tight',
-        ...tolerance.q,
-      });
-    }
-
-    return slots;
+  /** The round is played on the plugin, so there is nothing to pick from. */
+  slots() {
+    return [];
   },
 
   makePuzzle(rng, tier, settings) {
     const spec = this.tiers[tier];
-    const [least, most] = spec.extreme;
-    const size = toStep(least + rng() * (most - least), 0.5);
-    const q = spec.q ? toStep(logPick(rng, 0.8, 4), 0.1) : 1.2;
+    const size = () => toStep(spec.size[0] + rng() * (spec.size[1] - spec.size[0]), 0.5);
 
     if (settings.exercise === 'fix') {
-      // Something is wrong with the sample and the fix is to take it out: the
-      // answer is the inverse of the fault, which is what subtractive EQ is.
+      // The sample has a resonance in it. The answer is its inverse, which is
+      // what taking a problem out of a track actually is.
       const zone = pick(rng, TROUBLE);
       const frequency = toThirdOctave(logPick(rng, zone.low, zone.high));
+      const q = toStep(logPick(rng, 1.5, 5), 0.1);
+      const gain = size();
+
       return {
-        answer: { frequency, gain: -size, q },
-        fault: { frequency, gain: size, q, name: zone.name },
+        fault: { type: 'peaking', frequency, gain, q, on: true, name: zone.name },
+        answer: [{ type: 'peaking', frequency, gain: -gain, q, on: true }],
       };
     }
 
-    return {
-      answer: {
-        frequency: toThirdOctave(logPick(rng, 80, 8000)),
-        gain: (rng() < 0.5 ? -1 : 1) * size,
-        q,
-      },
-    };
+    // A move of one to three bands, spread out so they are separately audible
+    // rather than piling up in one place.
+    const zones = [[60, 300], [300, 1800], [1800, 12000]];
+    const answer = [];
+    for (let i = 0; i < spec.bands; i += 1) {
+      const [low, high] = zones[i % zones.length];
+      answer.push({
+        type: 'peaking',
+        frequency: toThirdOctave(logPick(rng, low, high)),
+        gain: (rng() < 0.5 ? -1 : 1) * size(),
+        q: toStep(logPick(rng, 0.8, 3), 0.1),
+        on: true,
+      });
+    }
+
+    return { answer };
   },
 
+  /**
+   * How close the curve you built is to the one being asked for.
+   *
+   * The curve, not the settings. Two different sets of bands can make the same
+   * shape - a wide cut here is a pair of narrow ones there - and an EQ that
+   * marked you down for arriving by a different route would be teaching the
+   * plugin rather than the ear. What is compared is what comes out.
+   */
   score(guess, answer, tier) {
-    const cells = this.slots(tier).map((slot) => ({
-      ...dialled(guess[slot.id], answer[slot.id], slot),
-      narrow: slot.id === 'q',
-    }));
+    const rate = 48000;
+    const mine = curveOf(guess, JUDGED, rate);
+    const theirs = curveOf(answer, JUDGED, rate);
 
-    // Landing every control inside its tight window is the whole exercise.
-    return { correct: cells.every((cell) => cell.state === 'hit'), cells };
-  },
+    let worst = 0;
+    let worstAt = 0;
 
-  clues(tier, settings) {
-    return settings.exercise === 'fix'
-      ? [
-        { id: 'mine', label: 'Play yours', primary: true },
-        { id: 'raw', label: 'Untreated' },
-      ]
-      : [
-        { id: 'target', label: 'Play the target', primary: true },
-        { id: 'mine', label: 'Play yours' },
-        { id: 'flat', label: 'Flat' },
-      ];
-  },
-
-  /** One peaking band, built from whatever settings it is handed. */
-  band(engine, { frequency, gain, q }, into) {
-    const filter = engine.ctx.createBiquadFilter();
-    filter.type = 'peaking';
-    filter.frequency.value = frequency;
-    filter.Q.value = q;
-    filter.gain.value = gain;
-    filter.connect(into);
-    return filter;
-  },
-
-  play(engine, { puzzle, clue, settings, guess }) {
-    engine.ensure();
-    const source = settings.source;
-
-    if (clue === 'flat') {
-      engine.playBed(source, { seconds: 4 });
-      return;
+    for (let i = 0; i < JUDGED.length; i += 1) {
+      const off = mine[i] - theirs[i];
+      if (Math.abs(off) > Math.abs(worst)) {
+        worst = off;
+        worstAt = JUDGED[i];
+      }
     }
 
-    // In the fix exercise the fault is in the sample, so everything but the
-    // untreated clue is heard through it - which is what makes a correct cut
-    // sound like the fault simply going away.
-    const faulty = (into) => (puzzle.fault ? this.band(engine, puzzle.fault, into) : into);
+    const error = Math.abs(worst);
+    const close = CLOSE_ENOUGH[tier];
+    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
-    if (clue === 'raw') {
-      engine.playBed(source, { seconds: 4, dest: faulty(engine.out) });
-      return;
-    }
-
-    const settingsToPlay = clue === 'target' ? puzzle.answer : guess;
-    const mine = this.band(engine, settingsToPlay, engine.out);
-    engine.playBed(source, { seconds: 4, dest: faulty(mine) });
-  },
-
-  reveal(answer) {
     return {
-      symbol: writeHz(answer.frequency),
-      name: `${writeDb(answer.gain)}, Q ${answer.q.toFixed(1)}`,
+      correct: error <= close,
+      error,
+      cells: [
+        { state, text: `${error.toFixed(1)} dB out` },
+        {
+          state,
+          text: error <= close
+            ? 'sits on it'
+            : `${writeHz(worstAt)} ${worst > 0 ? 'too hot' : 'too shy'}`,
+        },
+      ],
     };
   },
 
-  weak(answer) {
-    const zone = TROUBLE.find((t) => answer.frequency >= t.low && answer.frequency < t.high);
-    return { key: String(Math.round(answer.frequency)), label: zone ? zone.name : writeHz(answer.frequency) };
+  /* ---------- the surface ---------- */
+
+  mount(el, { engine, puzzle, onChange }) {
+    const bands = newStrip();
+    const fix = puzzle.settings.exercise === 'fix';
+
+    const plugin = new EQPlugin(el, { engine, bands, onChange, source: fix ? 'mix' : 'mix' });
+    plugin.setFault(fix ? puzzle.fault : null);
+    plugin.setTarget(fix ? [] : puzzle.answer);
+    // In the fix exercise there is no target to hear: the other side of the
+    // A/B is the sample with your EQ out of the way, which is what a bypass
+    // button is for.
+    plugin.nameOther(fix ? 'Bypass' : 'Target');
+
+    return {
+      guess: () => bands.map((band) => ({ ...band })),
+      reveal: () => {
+        plugin.showTarget(fix
+          ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
+          : puzzle.answer);
+        plugin.lock();
+      },
+      destroy: () => plugin.destroy(),
+    };
+  },
+
+  clues() {
+    return [];
+  },
+
+  play() {
+    // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  reveal(answer, tier, puzzle) {
+    const bands = puzzle?.fault
+      ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
+      : answer;
+
+    return {
+      symbol: bands.map((band) => writeHz(band.frequency)).join(' · '),
+      name: bands.map((band) => `${writeDb(band.gain)} at Q ${band.q.toFixed(1)}`).join(', '),
+    };
+  },
+
+  weak(answer, puzzle) {
+    const band = puzzle?.fault ?? answer[0];
+    const zone = TROUBLE.find((t) => band.frequency >= t.low && band.frequency < t.high);
+    return { key: zone ? zone.name : writeHz(band.frequency), label: zone ? zone.name : writeHz(band.frequency) };
   },
 };

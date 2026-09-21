@@ -30,6 +30,7 @@ const engine = new Engine();
 
 const ui = {
   playing: 'daily', // 'daily' | 'practice'
+  surface: null, // a mode that brings its own interface, mounted
   mode: 'chords',
   tier: 'easy',
   chosen: {}, // settings, per mode, so switching back finds them as you left them
@@ -196,6 +197,13 @@ function buildPicker() {
 }
 
 function syncPicker() {
+  if (mode().surface) {
+    const ready = ui.game.status === 'playing';
+    $('#submit').disabled = !ready;
+    $('#submit').textContent = ready ? 'Lock it in' : 'Submitted';
+    return;
+  }
+
   for (const button of document.querySelectorAll('[data-option]')) {
     const picked = ui.guess[button.dataset.slot] === button.dataset.option;
     button.setAttribute('aria-pressed', picked ? 'true' : 'false');
@@ -226,6 +234,33 @@ const label = (slot, value) => {
 };
 
 /* ---------- the clue ---------- */
+
+/** A mode with its own interface gets the sheet; everything else is hidden. */
+function mountSurface() {
+  ui.surface?.destroy();
+  ui.surface = null;
+
+  const surface = $('#surface');
+  const own = mode().surface;
+
+  surface.hidden = !own;
+  $('#clue').hidden = !!own;
+  $('#picker').hidden = !!own;
+  $('#advice').hidden = $('#advice').hidden || !!own;
+
+  if (!own) {
+    surface.textContent = '';
+    return;
+  }
+
+  ui.surface = mode().mount(surface, {
+    engine,
+    puzzle: ui.game.puzzle,
+    tier: ui.tier,
+    settings: settings(),
+    onChange: () => syncPicker(),
+  });
+}
 
 function buildClue() {
   const row = $('#clue');
@@ -285,6 +320,7 @@ function startGame({ fresh = false } = {}) {
   engine.stop();
   buildClue();
   buildPicker();
+  mountSurface();
 
   // One daily per mode per day: a finished one comes back read-only.
   const saved = ui.playing === 'daily' ? dailyResult(puzzle) : null;
@@ -307,11 +343,12 @@ function say(text, { matched = false } = {}) {
 }
 
 function onSubmit() {
-  const slots = mode().slots(ui.tier);
-  if (!slots.every((slot) => ui.guess[slot.id] !== undefined)) return;
+  const slots = mode().slots(ui.tier, settings());
+  const own = mode().surface;
+  if (!own && !slots.every((slot) => ui.guess[slot.id] !== undefined)) return;
 
   const before = ui.game;
-  const next = submitGuess(before, { ...ui.guess });
+  const next = submitGuess(before, own ? ui.surface.guess() : { ...ui.guess });
   ui.game = next;
 
   if (next.error) {
@@ -355,6 +392,13 @@ function finish(game, { replay = true } = {}) {
   played.appendChild(symbol);
   played.appendChild(document.createTextNode(answer.name ? ` — ${answer.name}.` : '.'));
 
+  // A mode with its own interface shows the answer on it - the curve you were
+  // chasing, drawn over the one you built.
+  if (mode().surface) {
+    ui.surface?.reveal();
+    return;
+  }
+
   if (replay) playClue(mode().clues(ui.tier, settings())[0].id);
 }
 
@@ -370,14 +414,14 @@ function render() {
   // readings and a board with three are both legible without a legend.
   const sample = game.guesses[0]
     ? game.guesses[0].score.cells
-    : previewCells(slots);
+    : previewCells(slots, mode());
 
   const head = document.createElement('div');
   head.className = 'board-head';
   head.style.gridTemplateColumns = columns(sample);
   for (const [i, cell] of sample.entries()) {
     const span = document.createElement('span');
-    span.textContent = headings(slots)[i] ?? '';
+    span.textContent = headings(slots, mode())[i] ?? '';
     head.appendChild(span);
   }
   board.appendChild(head);
@@ -396,7 +440,7 @@ function render() {
     }
 
     row.setAttribute('aria-label', played.score.cells
-      .map((cell, n) => `${headings(slots)[n] ?? 'reading'}: ${cell.text}, ${cell.state}`)
+      .map((cell, n) => `${headings(slots, mode())[n] ?? 'reading'}: ${cell.text}, ${cell.state}`)
       .join('; '));
 
     for (const cell of played.score.cells) row.appendChild(drawCell(cell));
@@ -435,14 +479,19 @@ const dialling = (slots) => slots.some((slot) => slot.kind === 'range');
 
 const extraReading = (slots) => !dialling(slots) || slots.some((slot) => slot.extraReading);
 
-function previewCells(slots) {
+function previewCells(slots, spec) {
+  // A mode with its own interface has no slots to preview: it reports how
+  // close the thing you built came, and where it came apart.
+  if (spec.surface) return [{ state: 'blank', text: '' }, { state: 'blank', text: '' }];
+
   const cells = slots.map((slot) => ({ state: 'blank', text: '', narrow: slot.narrowReading }));
   if (extraReading(slots)) cells.push({ state: 'blank', text: '', narrow: true });
   return cells;
 }
 
-const headings = (slots) =>
-  slots.map((slot) => slot.heading ?? slot.id).concat(extraReading(slots) ? ['close'] : []);
+const headings = (slots, spec) => (spec?.surface
+  ? ['how close', 'where']
+  : slots.map((slot) => slot.heading ?? slot.id).concat(extraReading(slots) ? ['close'] : []));
 
 const columns = (cells) => cells.map((cell) => (cell.narrow ? '0.45fr' : '1fr')).join(' ');
 
@@ -507,10 +556,18 @@ function fillHelp() {
   $('#helpLede').textContent = mode().lede;
 
   const clues = mode().clues(ui.tier, settings());
-  const slots = mode().slots(ui.tier);
+  const slots = mode().slots(ui.tier, settings());
   const tier = mode().tiers[ui.tier];
 
-  const entries = [
+  const entries = mode().surface ? [
+    ['Play the loop, then shape the EQ.',
+     'Drag a band to move it; the wheel over a band is its Q; the buttons under the '
+     + 'display turn one on and off. Yours and the other side swap instantly, so you '
+     + 'can flip while it runs.'],
+    ['You are judged on the curve, not the controls.',
+     'Two different sets of bands that make the same shape are the same answer - what is '
+     + 'compared is what comes out.'],
+  ] : [
     ['Press ' + clues[0].label.toLowerCase() + ', then name what you heard.',
      clues.length > 1
        ? `${clues.slice(1).map((c) => c.label).join(' and ')} ${clues.length > 2 ? 'are' : 'is'} there `
@@ -645,7 +702,9 @@ function wire() {
     if (e.target.matches('input, select, textarea') || document.querySelector('dialog[open]')) return;
     if (e.code === 'Space') {
       e.preventDefault();
-      playClue(mode().clues(ui.tier, settings())[0].id);
+      // Space is the transport wherever a musician meets one.
+      if (mode().surface) ui.surface?.toggle?.();
+      else playClue(mode().clues(ui.tier, settings())[0].id);
     }
     if (e.key === 'Enter' && !$('#submit').disabled) onSubmit();
   });

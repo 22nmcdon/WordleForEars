@@ -378,6 +378,8 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   font-weight: 500;
 }
 .board { display: flex; flex-direction: column; gap: 6px; }
+/* A mode that brings its own interface needs the attempts held off it. */
+.surface:not([hidden]) + .board { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .board-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .cell {
@@ -441,6 +443,157 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 
 .picker-group + .picker-group { margin-top: 18px; }
 .picker.done { opacity: 0.5; pointer-events: none; }
+
+/* --- the EQ ---------------------------------------------------------------- */
+/* A plugin, on paper. The display is the one place on this page that is dark:
+   a curve over a spectrum reads the way it does in every EQ ever made, and
+   inverting it here would be style at the cost of legibility. Everything
+   around it is the same cream and charcoal as the rest. */
+.eq { display: flex; flex-direction: column; gap: 12px; }
+
+.eq-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+.eq-name {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-weight: 500;
+  color: var(--blush-deep);
+}
+.eq-read {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--charcoal);
+  font-variant-numeric: tabular-nums;
+}
+
+.eq-display {
+  position: relative;
+  background: var(--charcoal);
+  border: 1px solid var(--charcoal);
+  border-radius: 1px;
+  /* Tall enough to read a curve on, and it gives ground on a phone before the
+     controls under it do. */
+  height: clamp(200px, 34vh, 320px);
+  overflow: hidden;
+}
+.eq-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The pointer is dragging a band, not scrolling the page. */
+  touch-action: none;
+}
+
+.eq-bands { display: flex; flex-wrap: wrap; gap: 6px; }
+.band-btn {
+  flex: 1 1 auto;
+  min-width: 64px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 6px 10px 7px;
+  text-align: center;
+}
+.band-btn:hover { border-color: var(--blush); }
+.band-short {
+  display: block;
+  font-family: var(--serif);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--charcoal);
+  letter-spacing: 0.04em;
+}
+.band-hz {
+  display: block;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.band-btn[aria-pressed="true"] { background: var(--charcoal); border-color: var(--charcoal); }
+.band-btn[aria-pressed="true"] .band-short,
+.band-btn[aria-pressed="true"] .band-hz { color: var(--cream); }
+
+.eq-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 20px;
+}
+.knob { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 10px; }
+.knob-name {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.knob-value {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--charcoal);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.knob-dial { grid-column: 1 / -1; width: 100%; margin: 2px 0 0; appearance: none; background: none; height: 24px; }
+.knob-dial:focus-visible { outline: 2px solid var(--blush-deep); outline-offset: 3px; }
+.knob-dial::-webkit-slider-runnable-track { height: 2px; background: var(--line); }
+.knob-dial::-moz-range-track { height: 2px; background: var(--line); }
+.knob-dial::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px; height: 18px; margin-top: -8px;
+  border-radius: 50%;
+  background: var(--charcoal);
+  border: 3px solid var(--paper);
+  box-shadow: 0 1px 3px rgba(36, 31, 29, 0.3);
+}
+.knob-dial::-moz-range-thumb {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--charcoal);
+  border: 3px solid var(--paper);
+}
+
+.eq-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* The A/B. One of them is on, the way a switch on a desk is. */
+.eq-ab { display: flex; border: 1px solid var(--line); border-radius: 30px; overflow: hidden; }
+.ab-btn {
+  background: none;
+  border: none;
+  padding: 7px 15px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.ab-btn:hover { color: var(--blush-deep); }
+.ab-btn.is-on { background: var(--charcoal); color: var(--cream); }
+
+/* Once the round is over the bands stop moving, and the answer is on screen. */
+.eq.is-locked .eq-bands,
+.eq.is-locked .eq-controls { opacity: 0.5; pointer-events: none; }
+
+@media (max-width: 760px) {
+  .eq-display { height: clamp(180px, 30vh, 240px); }
+  .eq-controls { grid-template-columns: 1fr; }
+}
 
 /* --- controls you dial ---------------------------------------------------- */
 /* The production half of the app: the same control you would reach for in a

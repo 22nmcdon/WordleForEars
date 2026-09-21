@@ -58,7 +58,7 @@ export function recordGame(game) {
   bucket.played += 1;
   // What counts as "one kind of answer" is the mode's to say: a chord quality,
   // a frequency band, a clave.
-  const kind = modeOf(puzzle.mode).weak(puzzle.answer);
+  const kind = modeOf(puzzle.mode).weak(puzzle.answer, puzzle);
   const perKind = bucket.byAnswer[kind.key] ?? { seen: 0, solved: 0, label: kind.label };
   perKind.seen += 1;
 

@@ -20,11 +20,13 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // game's guess ceiling out of the registry - so this is an order, not a list.
 const MODULES = [
   'theory.js', 'random.js', 'engrave.js',
+  'audio.js',
+  'eq/filters.js', 'eq/player.js', 'eq/plugin.js',
   'modes/scoring.js',
   'modes/chords.js', 'modes/pitch.js', 'modes/intervals.js', 'modes/eq.js',
   'modes/rhythm.js', 'modes/panning.js', 'modes/compression.js',
   'modes/index.js',
-  'audio.js', 'game.js', 'stats.js', 'share.js', 'main.js',
+  'game.js', 'stats.js', 'share.js', 'main.js',
 ];
 
 /**
@@ -57,6 +59,42 @@ function topLevelNames(source) {
   const declaration = /^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm;
   for (const [, name] of source.matchAll(declaration)) names.push(name);
   return names;
+}
+
+/**
+ * Refuses to emit a bundle that is missing a file the app imports.
+ *
+ * A name that is never declared is not a syntax error, so the parse check at
+ * the end of this script sails straight past it and the page dies at run time
+ * on the first line that uses it. The module list above has to be complete,
+ * and the imports are what say whether it is.
+ */
+function checkComplete(paths) {
+  const missing = new Set();
+
+  for (const { path, source } of paths) {
+    const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+
+    for (const [, target] of source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+      // Resolve "./x.js" and "../y/z.js" against the importing file's folder.
+      const parts = (folder ? folder.split('/') : []).concat(target.split('/'));
+      const resolved = [];
+      for (const part of parts) {
+        if (part === '.' || part === '') continue;
+        if (part === '..') resolved.pop();
+        else resolved.push(part);
+      }
+      const wanted = resolved.join('/');
+      if (!MODULES.includes(wanted)) missing.add(`${wanted} (imported by ${path})`);
+    }
+  }
+
+  if (missing.size) {
+    throw new Error(
+      `these files are imported but not in the bundle's module list:\n  `
+      + [...missing].join('\n  ')
+      + '\nAdd them to MODULES, in dependency order.');
+  }
 }
 
 /** Refuses to emit a bundle whose modules would collide once flattened. */
@@ -101,9 +139,10 @@ const modules = [];
 for (const path of MODULES) {
   const source = await readFile(join(root, 'src', path), 'utf8');
   const name = path.split('/').pop().replace(/\.js$/, '');
-  modules.push({ path, code: flatten(source, name) });
+  modules.push({ path, source, code: flatten(source, name) });
 }
 
+checkComplete(modules);
 checkNames(modules);
 
 const code = modules.map(({ path, code: source }) => `/* ---- src/${path} ---- */\n${source}`);

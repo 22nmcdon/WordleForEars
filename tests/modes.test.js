@@ -26,11 +26,26 @@ test('every mode is the same shape, so the shell never has to ask which it is', 
 
 test('a tier gives you enough guesses to deduce and not enough to enumerate', () => {
   for (const [id, tier] of ROUNDS) {
+    // A mode you dial rather than answer has no list to get through; what
+    // stops it being brute force is that the target is a curve, not a cell.
+    if (MODES[id].surface) continue;
+
     const spec = MODES[id].tiers[tier];
     const combinations = combinationsFor(id, tier);
     assert.ok(spec.guesses >= 2, `${id}/${tier} needs at least two guesses`);
     assert.ok(spec.guesses < combinations,
       `${id}/${tier} allows ${spec.guesses} guesses at ${combinations} answers - that is enumeration`);
+  }
+});
+
+test('a mode with its own interface can mount it, and asks for no slots', () => {
+  for (const [id, mode] of Object.entries(MODES)) {
+    if (!mode.surface) continue;
+    assert.equal(typeof mode.mount, 'function', `${id} claims a surface and cannot mount one`);
+    for (const [tier] of ROUNDS.filter(([which]) => which === id)) {
+      assert.equal(mode.slots(tier).length, 0, `${id} brings an interface and a picker`);
+      assert.equal(mode.clues(tier).length, 0, `${id} brings an interface and a clue row`);
+    }
   }
 });
 
@@ -64,6 +79,8 @@ test('generated answers are always reachable from the controls on screen', () =>
     const chosen = settingsFor(id, settings);
     for (let i = 0; i < 40; i += 1) {
       const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `${id}-${tier}-${i}` });
+
+      if (MODES[id].surface) continue;
 
       for (const slot of MODES[id].slots(tier, chosen)) {
         const answer = puzzle.answer[slot.id];
@@ -99,6 +116,8 @@ test('a wrong guess is read as wrong, and says which way to move', () => {
     const score = MODES[id].score(wrongGuess(puzzle), puzzle.answer, tier);
 
     assert.ok(!score.correct, `${id}/${tier} accepted a guess outside every tolerance`);
+
+    if (MODES[id].surface) continue;
 
     const dialled = MODES[id].slots(tier, chosen).filter((slot) => slot.kind === 'range');
     if (!dialled.length) continue;
@@ -150,6 +169,8 @@ test('every mode can say what the answer was, and what kind of answer it is', ()
 
 test('the first clue is the one that plays the thing being worked on', () => {
   for (const [id, tier, settings] of ROUNDS) {
+    if (MODES[id].surface) continue; // it runs its own transport
+
     const clues = MODES[id].clues(tier, settingsFor(id, settings));
     assert.ok(clues.length >= 1, `${id} offers no way to hear it`);
     assert.equal(clues.filter((clue) => clue.primary).length, 1, `${id} needs exactly one primary clue`);
@@ -160,6 +181,8 @@ test('the first clue is the one that plays the thing being worked on', () => {
 test('a production mode lets you hear your own settings, not only the target', () => {
   for (const [id, tier, settings] of ROUNDS) {
     const chosen = settingsFor(id, settings);
+    if (MODES[id].surface) continue; // hearing your own is the whole interface
+
     const dialled = MODES[id].slots(tier, chosen).some((slot) => slot.kind === 'range');
     if (!dialled) continue;
 
@@ -169,20 +192,70 @@ test('a production mode lets you hear your own settings, not only the target', (
   }
 });
 
-test('the fix exercise hands you a fault, and the answer cures it', () => {
+test('the EQ fix exercise hands you a fault, and the answer cures it', () => {
   for (const tier of Object.keys(MODES.eq.tiers)) {
     const puzzle = makePuzzle({ mode: 'eq', tier, settings: { exercise: 'fix' }, seed: `fix-${tier}` });
 
     assert.ok(puzzle.fault, 'the sample has to be faulty for there to be anything to fix');
-    assert.equal(puzzle.answer.frequency, puzzle.fault.frequency, 'cure it where it is');
-    assert.equal(puzzle.answer.gain, -puzzle.fault.gain, 'the cure is the inverse of the fault');
-    assert.equal(puzzle.answer.q, puzzle.fault.q, 'and as wide as the fault is');
-    assert.ok(puzzle.answer.gain < 0, 'a resonance is cut, not boosted');
+    assert.equal(puzzle.answer.length, 1, 'one fault, one cure');
+    assert.equal(puzzle.answer[0].frequency, puzzle.fault.frequency, 'cure it where it is');
+    assert.equal(puzzle.answer[0].gain, -puzzle.fault.gain, 'the cure is the inverse of the fault');
+    assert.equal(puzzle.answer[0].q, puzzle.fault.q, 'and as wide as the fault is');
+    assert.ok(puzzle.answer[0].gain < 0, 'a resonance is cut, not boosted');
   }
 
-  // Matching hands you no fault: the sample is clean and the move is the target's.
   const match = makePuzzle({ mode: 'eq', tier: 'easy', settings: { exercise: 'match' }, seed: 'm' });
-  assert.equal(match.fault, undefined);
+  assert.equal(match.fault, undefined, 'matching hands you a clean sample');
+});
+
+test('the EQ is judged on the curve, so a different route to the same shape counts', () => {
+  // One wide cut, against the two narrower ones that add up to it. Nobody who
+  // arrived at the same shape should be marked down for how they got there.
+  const target = [{ type: 'peaking', frequency: 1000, gain: -6, q: 1, on: true }];
+  const sameShape = [
+    { type: 'peaking', frequency: 1000, gain: -3, q: 1, on: true },
+    { type: 'peaking', frequency: 1000, gain: -3, q: 1, on: true },
+  ];
+
+  const score = MODES.eq.score(sameShape, target, 'easy');
+  assert.ok(score.error < 1, `two halves of a cut should be the cut: ${score.error.toFixed(2)} dB out`);
+  assert.ok(score.correct);
+});
+
+test('the EQ bar is set where doing nothing fails and a decibel out passes', () => {
+  for (const tier of ['easy', 'medium', 'hard']) {
+    const puzzle = makePuzzle({ mode: 'eq', tier, settings: { exercise: 'match' }, seed: `bar-${tier}` });
+    const score = (bands) => MODES.eq.score(bands, puzzle.answer, tier);
+
+    assert.equal(score(puzzle.answer).error, 0, `${tier}: the target is its own answer`);
+    assert.ok(score(puzzle.answer).correct);
+
+    // Leaving the EQ flat must never be a pass - it was, when the error was
+    // averaged across the spectrum instead of taken at its worst point.
+    assert.ok(!score([]).correct, `${tier}: doing nothing passed`);
+    assert.ok(score([]).error > 3, `${tier}: doing nothing scored ${score([]).error.toFixed(1)} dB`);
+
+    // A decibel of gain out is close enough to count; a third of an octave of
+    // frequency out is not, because it is audible.
+    const shy = puzzle.answer.map((band) => ({ ...band, gain: band.gain - Math.sign(band.gain) }));
+    assert.ok(score(shy).correct, `${tier}: a decibel out should still pass`);
+
+    const shifted = puzzle.answer.map((band) => ({ ...band, frequency: band.frequency * 1.26 }));
+    assert.ok(!score(shifted).correct, `${tier}: a third-octave out should not pass`);
+  }
+});
+
+test('the EQ says where the two curves part company, and which way', () => {
+  const target = [{ type: 'peaking', frequency: 2000, gain: 8, q: 1.5, on: true }];
+
+  const shy = MODES.eq.score([], target, 'easy');
+  assert.match(shy.cells[1].text, /too shy$/, 'no boost where one was wanted');
+  assert.match(shy.cells[1].text, /kHz|Hz/);
+
+  const hot = MODES.eq.score(
+    [{ type: 'peaking', frequency: 2000, gain: 16, q: 1.5, on: true }], target, 'easy');
+  assert.match(hot.cells[1].text, /too hot$/);
+  assert.equal(MODES.eq.score(target, target, 'easy').cells[1].text, 'sits on it');
 });
 
 test('evening out a loop asks for the settings that measurably even it out', () => {
@@ -205,23 +278,6 @@ test('chords: the reading is made from the shape, so the root cannot leak into i
   assert.deepEqual(low, high);
   assert.equal(low.cells[0].state, NEAR, 'major and minor share the fifth');
   assert.equal(low.cells[1].text, '1/2');
-});
-
-test('eq: an octave out is close, a decade out is not, and both say which way', () => {
-  const answer = { frequency: 1000, gain: -6, q: 1.4 };
-  const close = MODES.eq.score({ frequency: 2000, gain: -6, q: 1.4 }, answer, 'easy');
-  assert.equal(close.cells[0].state, NEAR);
-  assert.match(close.cells[0].text, /high$/, 'dialled above the answer');
-  assert.equal(close.cells[1].state, HIT, 'the gain itself was right');
-
-  const far = MODES.eq.score({ frequency: 120, gain: -6, q: 1.4 }, answer, 'easy');
-  assert.equal(far.cells[0].state, MISS);
-  assert.match(far.cells[0].text, /low$/);
-
-  // Boosting where a cut was wanted is the one thing that is simply backwards.
-  const backwards = MODES.eq.score({ frequency: 1000, gain: 6, q: 1.4 }, answer, 'easy');
-  assert.equal(backwards.cells[1].state, MISS);
-  assert.match(backwards.cells[1].text, /hot$/);
 });
 
 test('compression: too gentle and too hard are told apart', () => {

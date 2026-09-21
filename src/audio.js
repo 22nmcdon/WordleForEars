@@ -31,6 +31,7 @@ export class Engine {
     this.master = null;
     this.voices = [];
     this.noise = null;
+    this.loops = new Map();
   }
 
   /** Browsers only allow audio after a gesture, so this runs on first play. */
@@ -42,10 +43,13 @@ export class Engine {
       this.master.gain.value = 0.7;
       this.master.connect(this.ctx.destination);
     }
-    // A context that will not resume is one already rendering - which is what
-    // an offline render is, and is how the modes are checked.
-    if (this.ctx.state === 'suspended') {
-      try { this.ctx.resume(); } catch { /* offline */ }
+    // Only a live context is resumed. An offline one is suspended until it is
+    // rendered, and asking it to resume rejects a promise rather than throwing
+    // - so a try/catch does not catch it, and it surfaces as an unhandled
+    // rejection in the console on every render.
+    const offline = typeof this.ctx.startRendering === 'function';
+    if (!offline && this.ctx.state === 'suspended') {
+      this.ctx.resume()?.catch?.(() => { /* the gesture will come */ });
     }
     return this.ctx;
   }
@@ -258,6 +262,69 @@ export class Engine {
     }
 
     return { start, seconds: bars * beat * 4 };
+  }
+
+  /**
+   * A few bars rendered into a buffer, so they can be looped seamlessly under
+   * something you are adjusting while it plays.
+   *
+   * Scheduling the bed live would work for a clue that starts and finishes,
+   * and not for a tool: an EQ is judged by moving a band and hearing the same
+   * material change under your hands, which needs a loop that never stops and
+   * never restarts.
+   *
+   * The tail is folded back over the beginning rather than cut off. A loop of
+   * a decaying pattern has a chord still ringing when the splice comes round,
+   * and chopping it there is an audible click on every pass.
+   */
+  async renderLoop(kind, { bars = 2, bpm = 96 } = {}) {
+    this.ensure();
+    if (this.loops.has(kind)) return this.loops.get(kind);
+
+    const rate = this.ctx.sampleRate;
+    const beat = 60 / bpm;
+    const length = bars * 4 * beat;
+    const tail = 1.6;
+
+    const offline = new OfflineAudioContext(1, Math.ceil(rate * (length + tail)), rate);
+    const scratch = new Engine();
+    scratch.ctx = offline;
+    scratch.master = offline.createGain();
+    scratch.master.gain.value = 1;
+    scratch.master.connect(offline.destination);
+
+    if (kind === 'noise') scratch.playNoiseBed(length + tail, bpm);
+    else scratch.playBed(kind, { seconds: length, at: 0, bpm });
+
+    const rendered = await offline.startRendering();
+    const source = rendered.getChannelData(0);
+    const samples = Math.floor(rate * length);
+
+    const loop = this.ctx.createBuffer(1, samples, rate);
+    const data = loop.getChannelData(0);
+    for (let i = 0; i < samples; i += 1) data[i] = source[i];
+    // What was still ringing at the splice comes back round with it.
+    for (let i = 0; i + samples < source.length; i += 1) data[i] += source[i + samples];
+
+    this.loops.set(kind, loop);
+    return loop;
+  }
+
+  /**
+   * Pink noise, which is the oldest EQ training source there is: every band
+   * has something in it, so a move anywhere is a move you can hear.
+   */
+  playNoiseBed(seconds, bpm) {
+    const source = this.ctx.createBufferSource();
+    source.buffer = this.noiseBuffer();
+    source.loop = true;
+
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.09;
+    source.connect(gain).connect(this.master);
+    source.start(0);
+    source.stop(seconds);
+    this.keep({ gain, endsAt: seconds, stop: (when) => source.stop(when) });
   }
 
   /** A pattern of strikes, at beat positions, after a count-in of clicks. */

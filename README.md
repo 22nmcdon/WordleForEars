@@ -12,11 +12,28 @@ submit when you think you are on it. Each reading tells you how far off and
 *which way* — `2.8 oct high`, `3.5 dB shy`, `1.7× soft` — so the next attempt is
 an adjustment rather than a guess.
 
-| Mode | What you dial | Exercises |
+| Mode | What you work with | Exercises |
 | --- | --- | --- |
-| **EQ** | frequency, gain, and Q above Easy | **Match** a target move · **Fix** a sample with a resonance in it |
+| **EQ** | **a channel EQ** — six bands you drag over a live spectrum, with the loop running | **Match** a target move · **Fix** a sample with a resonance in it |
 | **Compression** | threshold, ratio, and attack on Hard | **Match** a target compressor · **Even out** a loop whose hits are all over the place |
 | **Panning** | placement across the field | **Match** a target position |
+
+### The EQ is a plugin
+
+It is not a question with an EQ drawn next to it. Six bands — high-pass, low
+shelf, two peaks, high shelf, low-pass — sit on a log frequency display over a
+live analyser. Drag a node to move it, wheel over it for Q, press a band button
+to switch it out. The loop runs continuously while you work, and **Yours** and
+**Target** are two chains fed by the same source, so flipping between them
+changes the processing and nothing else.
+
+You are judged on **the curve, not the controls**. Two different sets of bands
+that make the same shape are the same answer — a test pins that down with a
+wide cut against the two narrow ones that add up to it — because an EQ trainer
+that marked you down for arriving by a different route would be teaching the
+plugin rather than the ear. The reading says how far apart the two curves get
+at their worst point, and where: `3.1 dB out`, `450 Hz too hot`. When the round
+ends the target is drawn over your curve, so you can see what you were chasing.
 
 **The listening modes ask you to name what you heard**, which is what they are
 for — a chord quality is a thing you recognise, not a thing you dial.
@@ -83,9 +100,8 @@ that doing it right is audible rather than merely scored:
 
 - **EQ → Fix the sample** bakes a resonance into the sample — mud, boxiness,
   honk, harshness — and the answer is its exact inverse. Dial the right cut and
-  the problem simply goes away. Verified by rendering it: the fault shows up
-  **+6.9 dB** at its frequency, the correct cut leaves **−1.4 dB** (back to
-  clean), and a cut an octave off leaves **+6.4 dB** — still there.
+  the problem simply goes away; the other side of the A/B is your EQ out of
+  circuit, which is what a bypass button is for.
 - **Compression → Even out the loop** hands you a loop whose hits alternate
   9–15 dB apart. Verified the same way: **10.1 dB** of unevenness untreated,
   **0.1 dB** with the reference settings, **6.0 dB** if the ratio is too gentle,
@@ -110,8 +126,6 @@ that doing it right is audible rather than merely scored:
 
 ## Not built yet
 
-- **More than one EQ band at a time.** One band, three controls; a second band
-  is three more sliders and the same scoring.
 - **Guitar and synth-pad timbres** for chords — the plan's third variable. One
   piano for now.
 - **Stereo width** in panning, and **release** in compression: both are one more
@@ -134,6 +148,12 @@ chips; `range` gives `min`, `max`, a `format` for writing the value down, and
 the tolerances that decide right from close — and renders as a control, with
 its value read back live and audible through `Play yours` before it is
 committed.
+
+A mode can also skip slots entirely and bring its own interface: set
+`surface: true` and implement `mount(el, context)`, returning `guess()`,
+`reveal()` and `destroy()`. That is how the EQ is a plugin rather than a
+picker, and the board, the daily, the attempts and the share grid carry on
+working above it unchanged.
 
 `tests/modes.test.js` holds every mode to that contract: that its own answer
 scores green in every cell, that every answer it can generate is answerable from
@@ -170,7 +190,8 @@ blocked.
 ```
 index.html          shell and markup
 styles.css          the design system, as tokens and components
-src/audio.js        the whole suite's sound: piano, kit, bed, patterns
+src/audio.js        the whole suite's sound: piano, kit, bed, patterns, loops
+src/eq/             the channel EQ: filter maths, the A/B player, the plugin
 src/theory.js       pitch classes, chord qualities, voicings
 src/random.js       seeded PRNG + daily/puzzle numbering
 src/modes/          one file per mode, plus the shared scoring vocabulary
@@ -186,8 +207,19 @@ tests/              node:test coverage of all of the above
 Game logic is deliberately DOM-free, which is what let one shell serve seven
 modes — and what lets the modes be tested without a browser.
 
-The audio is checked by rendering it, not by listening hopefully: every mode's
-clue goes through an `OfflineAudioContext` and gets measured. That is how the
+**The EQ curve is checked against the audio itself.** A drawn curve that drifts
+from the sound is worse than no curve, so every band type is compared with
+`BiquadFilterNode.getFrequencyResponse`, and the whole chain is measured by
+rendering tones through the player's own graph offline. Both agree to
+**0.000 dB**. Two real faults came out of that check: Web Audio reads `Q` as
+*decibels of resonance* on a low-pass or high-pass where it is a plain Q on a
+peak (3.7 dB of error at the corner), and a band switched off was parked at its
+corner frequency rather than taken out of circuit, so an "off" low-pass was
+still taking three quarters of a decibel off 12 kHz that the curve did not show.
+
+The rest of the audio is checked the same way — by rendering it, not by
+listening hopefully: every mode's clue goes through an `OfflineAudioContext`
+and gets measured. That is how the
 fix exercises above were confirmed to work, how panning was confirmed to be a
 real stereo image rather than a level difference, and how several genuine bugs
 were found — the rhythm clue peaking at 0.06 where the rest of the suite peaks

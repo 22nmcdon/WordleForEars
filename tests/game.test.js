@@ -90,9 +90,9 @@ test('repeating a guess is rejected without burning a turn', () => {
 });
 
 test('two guesses differing in one control are two different guesses', () => {
-  const puzzle = makePuzzle({ mode: 'eq', tier: 'medium', seed: 'slots' });
+  const puzzle = makePuzzle({ mode: 'compression', tier: 'medium', seed: 'slots' });
   const first = wrongGuess(puzzle);
-  const second = { ...first, gain: first.gain - 1 };
+  const second = { ...first, ratio: first.ratio * 1.2 };
 
   let game = submitGuess(createGame(puzzle), first);
   game = submitGuess(game, second);
@@ -107,9 +107,10 @@ test('scoring goes through the mode that asked the question', () => {
 });
 
 test('a mode\'s settings fill themselves in, and refuse what it does not offer', () => {
-  assert.deepEqual(settingsFor('eq', {}), { exercise: 'match', source: 'mix' });
-  assert.deepEqual(settingsFor('eq', { exercise: 'fix' }), { exercise: 'fix', source: 'mix' });
-  assert.deepEqual(settingsFor('eq', { exercise: 'nonsense' }), { exercise: 'match', source: 'mix' });
+  assert.deepEqual(settingsFor('eq', {}), { exercise: 'match' });
+  assert.deepEqual(settingsFor('eq', { exercise: 'fix' }), { exercise: 'fix' });
+  assert.deepEqual(settingsFor('eq', { exercise: 'nonsense' }), { exercise: 'match' });
+  assert.deepEqual(settingsFor('compression', {}), { exercise: 'match', source: 'drums' });
   assert.deepEqual(settingsFor('rhythm', {}), { tempo: '84' });
 });
 
@@ -203,13 +204,13 @@ test('chords still move their root about, though it is never guessed', () => {
 /* --- sharing ------------------------------------------------------------- */
 
 test('the share grid names the mode, counts the guesses and hides the answer', () => {
-  const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', settings: { exercise: 'match' }, seed: 'share' });
+  const puzzle = makePuzzle({ mode: 'compression', tier: 'easy', settings: { exercise: 'match' }, seed: 'share' });
   let game = createGame(puzzle, { mode: 'daily', date: new Date('2026-09-21T10:00:00Z') });
   game = submitGuess(game, wrongGuess(puzzle));
   game = submitGuess(game, answerAsGuess(puzzle));
 
   const lines = shareText(game).split('\n');
-  assert.match(lines[0], /^Harmonle EQ #\d+ · Easy 2\/4$/);
+  assert.match(lines[0], /^Harmonle Compression #\d+ · Easy 2\/4$/);
   assert.equal([...lines[2]].length, 2, 'one square per reading');
   assert.equal(lines[3], '🟩🟩');
 
@@ -228,6 +229,9 @@ test('a lost round shares as X of its allowance', () => {
 
 test('a guess count is never more than the answers to choose from', () => {
   for (const mode of Object.keys(MODES)) {
+    // A mode you dial on its own interface has no list of answers to count.
+    if (MODES[mode].surface) continue;
+
     for (const tier of Object.keys(MODES[mode].tiers)) {
       assert.ok(guessesFor(mode, tier) < combinationsFor(mode, tier), `${mode}/${tier}`);
     }
