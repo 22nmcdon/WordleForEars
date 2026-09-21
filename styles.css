@@ -442,6 +442,89 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .picker-group + .picker-group { margin-top: 18px; }
 .picker.done { opacity: 0.5; pointer-events: none; }
 
+/* --- controls you dial ---------------------------------------------------- */
+/* The production half of the app: the same control you would reach for in a
+   session, with the same units written on it, and audible before you commit.
+   Deliberately not a chip - a chip is a choice, and this is a setting. */
+.control {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+.control-name {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 500;
+  color: var(--blush-deep);
+}
+.control-value {
+  font-family: var(--serif);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--charcoal);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.control-ends {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+  margin-top: -4px;
+}
+
+.dial {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 6px 0 0;
+  appearance: none;
+  background: none;
+  /* A touch target at every width, so there is no "touch mode" to get out of
+     step with - the thumb is what the finger is aiming at. */
+  height: 28px;
+}
+.dial:focus-visible { outline: 2px solid var(--blush-deep); outline-offset: 4px; }
+
+/* The track is a rule on paper; the thumb is a dot, which is the one shape
+   this system gives to something you move. */
+.dial::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--line);
+  border-radius: 1px;
+}
+.dial::-moz-range-track { height: 2px; background: var(--line); border-radius: 1px; }
+.dial::-webkit-slider-thumb {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -10px;
+  border-radius: 50%;
+  background: var(--charcoal);
+  border: 3px solid var(--cream-2);
+  box-shadow: 0 1px 4px rgba(36, 31, 29, 0.28);
+  cursor: grab;
+}
+.dial::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--charcoal);
+  border: 3px solid var(--cream-2);
+  box-shadow: 0 1px 4px rgba(36, 31, 29, 0.28);
+  cursor: grab;
+}
+.dial:hover::-webkit-slider-thumb { background: var(--blush-deep); }
+.dial:hover::-moz-range-thumb { background: var(--blush-deep); }
+.dial:active::-webkit-slider-thumb { cursor: grabbing; }
+
+/* Two settings mean two selects in the setup row. */
+.settings { display: contents; }
+
 /* Qualities: the symbol as a player would write it, with its name underneath. */
 .options {
   display: grid;

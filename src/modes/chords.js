@@ -14,7 +14,7 @@ export default {
 
   tiers: TIERS,
 
-  setting: {
+  settings: [{
     id: 'voicing',
     label: 'Voicing',
     options: [
@@ -22,7 +22,7 @@ export default {
       { id: 'inversion', label: 'Inversions' },
       { id: 'open', label: 'Open voicings' },
     ],
-  },
+  }],
 
   slots(tier) {
     return [{
@@ -84,12 +84,12 @@ export default {
     ];
   },
 
-  play(engine, puzzle, clue, setting) {
+  play(engine, { puzzle, clue, settings }) {
     if (clue === 'reference') {
       engine.tone(60, engine.start, 1.2);
       return;
     }
-    const notes = voiceChord(puzzle.answer, setting, puzzle.octave, puzzle.spin);
+    const notes = voiceChord(puzzle.answer, settings.voicing, puzzle.octave, puzzle.spin);
     engine.playNotes(notes, { arpeggio: clue === 'arpeggio' });
   },
 

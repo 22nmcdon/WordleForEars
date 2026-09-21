@@ -1,18 +1,32 @@
 # Harmonle — ear-training Wordle (proof of concept)
 
-Hear something and name what it was, with Wordle-style coloured feedback.
-**Seven modes**, three tiers each, a daily puzzle per mode and unlimited
-practice. No accounts; stats stay in the browser.
+An audio-production trainer that plays like Wordle. **Seven modes**, three
+tiers each, a daily puzzle per mode and unlimited practice. No accounts; stats
+stay in the browser.
+
+Two halves, and they ask differently.
+
+**The production modes give you the actual controls.** You dial an EQ band or a
+compressor, hear your settings against the target as often as you like, and
+submit when you think you are on it. Each reading tells you how far off and
+*which way* — `2.8 oct high`, `3.5 dB shy`, `1.7× soft` — so the next attempt is
+an adjustment rather than a guess.
+
+| Mode | What you dial | Exercises |
+| --- | --- | --- |
+| **EQ** | frequency, gain, and Q above Easy | **Match** a target move · **Fix** a sample with a resonance in it |
+| **Compression** | threshold, ratio, and attack on Hard | **Match** a target compressor · **Even out** a loop whose hits are all over the place |
+| **Panning** | placement across the field | **Match** a target position |
+
+**The listening modes ask you to name what you heard**, which is what they are
+for — a chord quality is a thing you recognise, not a thing you dial.
 
 | Mode | The question | Tiers run from |
 | --- | --- | --- |
 | **Chords** | What kind of chord is that | triads → altered dominants |
 | **Pitch** | Name the note you heard | white notes → all twelve, no reference |
 | **Intervals** | How far apart were they | octave and 5th → the tritone and the m2 |
-| **EQ** | Where did the move happen | five wide zones at ±10 dB → nine surgical ones at ±2 |
 | **Rhythm** | What is it playing | subdivisions → clave and polyrhythm |
-| **Panning** | Where is it in the stereo field | left/centre/right → seven positions |
-| **Compression** | How hard is it being squashed | is it even → ratio and attack |
 
 ## Run it
 
@@ -44,27 +58,45 @@ writing it; `tests/bundle.test.js` runs the whole thing on every `npm test`.
 
 ## How a round works
 
-1. Press the clue. Most modes offer something to compare against — EQ plays the
-   same bars **flat**, compression plays them **uncompressed**, chords will
-   **arpeggiate**, pitch and intervals offer a **reference C**.
-2. Name what you heard. Some modes ask one thing, some ask two: an EQ move is a
-   band *and* a gain.
-3. Two to four guesses depending on the tier — enough to deduce, never enough to
-   press every button. A test enforces exactly that.
+1. Press the clue. Every mode offers something to work against — **Play the
+   target** and **Play yours** in the production modes, **Flat** or
+   **Untreated** to hear the sample with nothing done to it, **Arpeggiate** for
+   a chord, a **reference C** for pitch and intervals.
+2. Dial it in, or name it. Some modes ask one thing, some ask three: an EQ move
+   is a frequency, a gain and a width.
+3. Two to four attempts depending on the tier — enough to converge, never
+   enough to sweep the control. A test enforces exactly that.
 
-Every guess comes back as coloured readings: 🟩 that is it, 🟨 close, 🟥 not
-close. What "close" means is each mode's own business, and the last column
-spells it out — `2/3` notes shared, `1 semitone`, `1.3 oct`, `2 steps`,
-`syncopated`.
+Every attempt comes back as coloured readings: 🟩 that is it, 🟨 close, 🟥 not
+close. What "close" means is each mode's own business, and the reading spells it
+out — `2.8 oct high`, `3.5 dB shy`, `1.7× soft`, `2/3` notes shared,
+`1 semitone`, `syncopated`.
 
-Nothing here tells you that you are wrong. "Outside the chord", "1.3 octaves
-off" — the reading names where the thing sits, which is the ear-training answer
-and also the house style.
+Nothing here tells you that you are wrong. "3 dB hot", "outside the chord" —
+the reading names where the thing sits, which is both the useful answer and the
+house style.
+
+### The fix exercises
+
+These are the ones that make it a tool rather than a quiz, and both are built so
+that doing it right is audible rather than merely scored:
+
+- **EQ → Fix the sample** bakes a resonance into the sample — mud, boxiness,
+  honk, harshness — and the answer is its exact inverse. Dial the right cut and
+  the problem simply goes away. Verified by rendering it: the fault shows up
+  **+6.9 dB** at its frequency, the correct cut leaves **−1.4 dB** (back to
+  clean), and a cut an octave off leaves **+6.4 dB** — still there.
+- **Compression → Even out the loop** hands you a loop whose hits alternate
+  9–15 dB apart. Verified the same way: **10.1 dB** of unevenness untreated,
+  **0.1 dB** with the reference settings, **6.0 dB** if the ratio is too gentle,
+  **9.5 dB** if the threshold is too high.
 
 ## What's in this POC
 
 - **All seven modes above**, each with three tiers, a daily seeded from the UTC
-  date (the same puzzle for everybody) and unlimited practice.
+  date (the same puzzle for everybody) and unlimited practice. An exercise gets
+  its own daily, because matching a target and curing a fault are different
+  exercises rather than two views of one.
 - **Every sound synthesised live** — no samples to host. A piano built from
   additive partials, a kit built from filtered noise, and a four-piece bed
   (kick, bass, chord, hats) for the modes that need something broadband to judge
@@ -78,12 +110,14 @@ and also the house style.
 
 ## Not built yet
 
+- **More than one EQ band at a time.** One band, three controls; a second band
+  is three more sliders and the same scoring.
 - **Guitar and synth-pad timbres** for chords — the plan's third variable. One
   piano for now.
-- **Stereo width** in panning, and **release** in compression: both are in the
-  plan's sketch of those modes, and both are one more slot when wanted.
-- **EQ's continuous-Hz guess** on the hard tier. It is nine zones with a
-  tolerance, not a free number with a tolerance window.
+- **Stereo width** in panning, and **release** in compression: both are one more
+  control when wanted.
+- **Your own audio.** Everything is synthesised, so there is nothing to upload
+  a stem into yet.
 - Any server, account or cross-device sync. Stats live in `localStorage`.
 
 ## Adding a mode
@@ -94,6 +128,12 @@ A mode is data and seven functions in `src/modes/`, registered in
 and what the answer was (`reveal`, `weak`). Nothing else in the app knows which
 mode is showing — the board, the picker, the share grid and the stats are all
 built from what the mode returns.
+
+A slot is one of two kinds. `choice` gives a list of options and renders as
+chips; `range` gives `min`, `max`, a `format` for writing the value down, and
+the tolerances that decide right from close — and renders as a control, with
+its value read back live and audible through `Play yours` before it is
+committed.
 
 `tests/modes.test.js` holds every mode to that contract: that its own answer
 scores green in every cell, that every answer it can generate is answerable from
@@ -146,13 +186,27 @@ tests/              node:test coverage of all of the above
 Game logic is deliberately DOM-free, which is what let one shell serve seven
 modes — and what lets the modes be tested without a browser.
 
-The audio was checked by rendering it, not by listening hopefully: every mode's
-clue goes through an `OfflineAudioContext` and gets measured. That is how the EQ
-move was confirmed to land on its own band (+10 dB at 3 kHz, −0.7 dB two zones
-away), how panning was confirmed to be a real stereo image rather than a level
-difference, and how two genuine bugs were found — the rhythm clue peaking at
-0.06 where the rest of the suite peaks near 0.35, and compression clipping at
-1.8 because Web Audio's compressor applies a makeup gain of its own on top of
-the one the mode was adding. Compression's `trim` numbers come straight out of
-that measurement: every setting now sits within ±1.4 dB of the untouched loop,
-so the mode is a compression test rather than a loudness test.
+The audio is checked by rendering it, not by listening hopefully: every mode's
+clue goes through an `OfflineAudioContext` and gets measured. That is how the
+fix exercises above were confirmed to work, how panning was confirmed to be a
+real stereo image rather than a level difference, and how several genuine bugs
+were found — the rhythm clue peaking at 0.06 where the rest of the suite peaks
+near 0.35; compression clipping at 1.8 because Web Audio's compressor applies a
+makeup gain of its own; and the compressor sitting ahead of the master gain, so
+the threshold that was right for the drums was 3 dB wrong for the full mix.
+
+Three tables in the code are measurements rather than arithmetic, and say so
+where they sit:
+
+- **`MAKEUP`** in `compression.js` — what the compressor node does to the
+  loudness at each setting, so it can be taken back off. Every setting now
+  lands within about a decibel of the untouched loop, which is what stops the
+  exercise being answerable as "the loud one".
+- **`INTO_THE_CHAIN`** — the level each source arrives at, so a threshold means
+  the same thing whichever you pick.
+- **`THRESHOLD_UNDER` / `RATIO_FOR`** — what it actually takes to level the
+  loop. On paper a threshold at the quiet hits and a ratio of spread-over-three
+  should do it; rendered, it leaves half the unevenness, because the detector
+  works on peaks while most of a drum hit's energy sits below its peak. The
+  reference answer is the one that measures flat, since it is what the player's
+  own dialling is scored against.

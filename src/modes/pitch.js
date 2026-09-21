@@ -23,14 +23,14 @@ export default {
     hard: { label: 'Hard', blurb: 'All twelve, one octave up', guesses: 4, notes: ALL, octave: 5 },
   },
 
-  setting: {
+  settings: [{
     id: 'reference',
     label: 'Reference',
     options: [
       { id: 'offered', label: 'Middle C on tap' },
       { id: 'none', label: 'No reference' },
     ],
-  },
+  }],
 
   slots(tier) {
     return [{
@@ -60,15 +60,15 @@ export default {
     };
   },
 
-  clues(tier, setting) {
+  clues(tier, settings) {
     const clues = [{ id: 'note', label: 'Play the note', primary: true }];
     // Offering middle C is the difference between relative pitch and absolute,
     // so it is the player's choice to make rather than the tier's.
-    if (setting === 'offered') clues.push({ id: 'reference', label: 'Reference C' });
+    if (settings.reference === 'offered') clues.push({ id: 'reference', label: 'Reference C' });
     return clues;
   },
 
-  play(engine, puzzle, clue) {
+  play(engine, { puzzle, clue }) {
     if (clue === 'reference') {
       engine.tone(60, engine.start, 1.2);
       return;

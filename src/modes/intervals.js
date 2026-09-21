@@ -33,14 +33,14 @@ export default {
     hard: { label: 'Hard', blurb: 'All twelve, tritone included', guesses: 4, intervals: INTERVALS },
   },
 
-  setting: {
+  settings: [{
     id: 'how',
     label: 'Played',
     options: [
       { id: 'melodic', label: 'One after the other' },
       { id: 'harmonic', label: 'Both together' },
     ],
-  },
+  }],
 
   slots(tier) {
     return [{
@@ -78,14 +78,14 @@ export default {
     ];
   },
 
-  play(engine, puzzle, clue, setting) {
+  play(engine, { puzzle, clue, settings }) {
     const low = puzzle.low;
     const high = low + Number(puzzle.answer.interval);
     // Downwards is the same interval and a different thing to hear, which is
     // why it is offered rather than being a second puzzle.
     const notes = clue === 'flip' ? [high, low] : [low, high];
-    engine.playNotes(setting === 'harmonic' ? [low, high] : notes,
-                     { arpeggio: setting !== 'harmonic', duration: 2 });
+    engine.playNotes(settings.how === 'harmonic' ? [low, high] : notes,
+                     { arpeggio: settings.how !== 'harmonic', duration: 2 });
   },
 
   reveal(answer) {

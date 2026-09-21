@@ -1,88 +1,99 @@
-import { onScale, distanceCell, pick } from './scoring.js';
+import { dialled, toStep } from './scoring.js';
 
-/** Where it sits, from hard left to hard right. */
-const spot = (pan, symbol, name) => ({ id: String(pan), pan, symbol, name });
-
-const HARD_LEFT = spot(-1, 'L', 'hard left');
-const HALF_LEFT = spot(-0.5, '50% L', 'half left');
-const CENTRE = spot(0, 'C', 'centre');
-const HALF_RIGHT = spot(0.5, '50% R', 'half right');
-const HARD_RIGHT = spot(1, 'R', 'hard right');
+const writePan = (pan) => {
+  const at = Math.round(pan);
+  if (Math.abs(at) < 3) return 'Centre';
+  return `${Math.abs(at)}% ${at < 0 ? 'left' : 'right'}`;
+};
 
 export default {
   id: 'panning',
   label: 'Panning',
-  blurb: 'Where is it in the stereo field',
-  lede: 'The same few bars, placed somewhere across the stereo field. '
-      + 'Say where.',
+  blurb: 'Place it where the target sits',
+  lede: 'The pan control is yours. Move it until your placement sits on top of '
+      + 'the target — and you can flip between the two as often as you like.',
   advice: 'Headphones, for this one — a laptop speaker has almost no stereo field to point at.',
 
-  tiers: {
-    easy: { label: 'Easy', blurb: 'Left, centre, right', guesses: 2, spots: [HARD_LEFT, CENTRE, HARD_RIGHT] },
-    medium: { label: 'Medium', blurb: 'Five positions', guesses: 3,
-              spots: [HARD_LEFT, HALF_LEFT, CENTRE, HALF_RIGHT, HARD_RIGHT] },
-    hard: { label: 'Hard', blurb: 'Seven positions', guesses: 4,
-            spots: [HARD_LEFT, spot(-0.7, '70% L', 'well left'), spot(-0.35, '35% L', 'a little left'),
-                    CENTRE, spot(0.35, '35% R', 'a little right'), spot(0.7, '70% R', 'well right'), HARD_RIGHT] },
-  },
+  settings: [
+    {
+      id: 'source',
+      label: 'Source',
+      options: [
+        { id: 'instrument', label: 'One instrument' },
+        { id: 'mix', label: 'Full mix' },
+      ],
+    },
+  ],
 
-  setting: {
-    id: 'source',
-    label: 'Source',
-    options: [
-      { id: 'instrument', label: 'One instrument' },
-      { id: 'mix', label: 'Full mix' },
-    ],
+  tiers: {
+    easy: { label: 'Easy', blurb: 'Hard left, centre, hard right', guesses: 3, places: [-100, 0, 100], hit: 12, near: 40 },
+    medium: { label: 'Medium', blurb: 'Anywhere, in steps of 25', guesses: 4, step: 25, hit: 12, near: 30 },
+    hard: { label: 'Hard', blurb: 'Anywhere at all', guesses: 4, step: 5, hit: 8, near: 20 },
   },
 
   slots(tier) {
-    return [{ id: 'spot', heading: 'place', label: 'Where is it sitting?', options: this.tiers[tier].spots }];
+    const spec = this.tiers[tier];
+    return [{
+      kind: 'range',
+      id: 'pan',
+      heading: 'placement',
+      extraReading: true,
+      label: 'Where is it sitting?',
+      min: -100, max: 100, step: spec.step ?? 25, start: 0,
+      format: writePan,
+      unit: '%', below: 'left', above: 'right',
+      hit: spec.hit, near: spec.near,
+    }];
   },
 
   makePuzzle(rng, tier) {
-    return { answer: { spot: pick(rng, this.tiers[tier].spots).id } };
+    const spec = this.tiers[tier];
+    const pan = spec.places
+      ? spec.places[Math.floor(rng() * spec.places.length)]
+      : toStep(-100 + rng() * 200, spec.step);
+
+    return { answer: { pan } };
   },
 
   score(guess, answer, tier) {
-    const spots = this.tiers[tier].spots;
-    const guessed = spots.findIndex((s) => s.id === guess.spot);
-    const actual = spots.findIndex((s) => s.id === answer.spot);
-    const steps = guessed - actual;
+    const slot = this.slots(tier)[0];
+    const reading = dialled(guess.pan, answer.pan, slot);
 
     return {
-      correct: guess.spot === answer.spot,
+      correct: reading.state === 'hit',
       cells: [
-        { state: onScale(guessed, actual), text: spots[guessed].symbol },
-        distanceCell(steps, 'place'),
+        { state: reading.state, text: writePan(guess.pan) },
+        { ...reading, narrow: true },
       ],
     };
   },
 
   clues() {
-    return [{ id: 'play', label: 'Play it', primary: true }];
+    return [
+      { id: 'target', label: 'Play the target', primary: true },
+      { id: 'mine', label: 'Play yours' },
+    ];
   },
 
-  play(engine, puzzle, clue, setting) {
+  play(engine, { puzzle, clue, settings, guess }) {
     engine.ensure();
 
     // StereoPannerNode is equal-power and constant-width, which is what a pan
-    // control on a desk does. A plain gain difference would be a balance
-    // control, and would read as a level change rather than a placing.
+    // control on a desk does. A gain difference would be a balance control,
+    // and would read as a level change rather than a placing.
     const panner = engine.ctx.createStereoPanner();
-    panner.pan.value = Number(puzzle.answer.spot);
+    panner.pan.value = (clue === 'target' ? puzzle.answer.pan : guess.pan) / 100;
     panner.connect(engine.out);
 
-    engine.playBed(setting, { seconds: 3.6, dest: panner });
+    engine.playBed(settings.source, { seconds: 3.6, dest: panner });
   },
 
   reveal(answer) {
-    const all = this.tiers.hard.spots.concat(this.tiers.medium.spots);
-    const found = all.find((s) => s.id === answer.spot);
-    return { symbol: found.symbol, name: found.name };
+    return { symbol: writePan(answer.pan), name: '' };
   },
 
   weak(answer) {
-    const all = this.tiers.hard.spots.concat(this.tiers.medium.spots);
-    return { key: answer.spot, label: all.find((s) => s.id === answer.spot).name };
+    const side = answer.pan < -20 ? 'the left' : answer.pan > 20 ? 'the right' : 'the centre';
+    return { key: side, label: side };
   },
 };

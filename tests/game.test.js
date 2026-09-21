@@ -5,37 +5,12 @@ import { QUALITIES, TIERS, shapeOf, chordName, chordPitchClasses, voiceChord } f
 import { MODES, modeOf } from '../src/modes/index.js';
 import {
   MAX_GUESSES, guessesFor, combinationsFor, scoreGuess,
-  createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal,
+  createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal, settingsFor,
 } from '../src/game.js';
 import { mulberry32, hashSeed, puzzleNumber, dayKey } from '../src/random.js';
 import { shareText } from '../src/share.js';
+import { answerAsGuess, wrongGuess } from './helpers.js';
 
-const answerAsGuess = (puzzle) => Object.fromEntries(
-  modeOf(puzzle.mode).slots(puzzle.tier).map((slot) => [slot.id, puzzle.answer[slot.id]]),
-);
-
-/**
- * The nth guess that is not the answer.
- *
- * Every combination, in order, with the answer taken out - because a mode with
- * two slots has more wrong answers than either slot has options, and picking
- * per slot runs out and starts repeating itself, which the game rejects as a
- * guess already tried.
- */
-function wrongGuess(puzzle, nth = 0) {
-  const slots = modeOf(puzzle.mode).slots(puzzle.tier);
-
-  let combinations = [{}];
-  for (const slot of slots) {
-    combinations = combinations.flatMap((partial) =>
-      slot.options.map((option) => ({ ...partial, [slot.id]: option.id })));
-  }
-
-  const wrong = combinations.filter((guess) =>
-    slots.some((slot) => guess[slot.id] !== puzzle.answer[slot.id]));
-
-  return wrong[nth % wrong.length];
-}
 
 /* --- theory, which the chords mode is built on --------------------------- */
 
@@ -106,7 +81,7 @@ test('a tier allows its own number of guesses, and no more', () => {
 });
 
 test('repeating a guess is rejected without burning a turn', () => {
-  const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', seed: 'x' });
+  const puzzle = makePuzzle({ mode: 'chords', tier: 'medium', seed: 'x' });
   const guess = wrongGuess(puzzle);
   let game = submitGuess(createGame(puzzle), guess);
   const repeat = submitGuess(game, { ...guess });
@@ -114,14 +89,14 @@ test('repeating a guess is rejected without burning a turn', () => {
   assert.match(repeat.error, /already/i);
 });
 
-test('two guesses differing in one slot are two different guesses', () => {
+test('two guesses differing in one control are two different guesses', () => {
   const puzzle = makePuzzle({ mode: 'eq', tier: 'medium', seed: 'slots' });
   const first = wrongGuess(puzzle);
-  const second = { ...first, move: MODES.eq.tiers.medium.moves.find((m) => m.id !== first.move).id };
+  const second = { ...first, gain: first.gain - 1 };
 
   let game = submitGuess(createGame(puzzle), first);
   game = submitGuess(game, second);
-  assert.equal(game.guesses.length, 2);
+  assert.equal(game.guesses.length, 2, 'a hair of movement on one control is a new attempt');
 });
 
 test('scoring goes through the mode that asked the question', () => {
@@ -131,22 +106,35 @@ test('scoring goes through the mode that asked the question', () => {
   assert.equal(score.cells.length, MODES.rhythm.score(answerAsGuess(puzzle), puzzle.answer, 'easy').cells.length);
 });
 
+test('a mode\'s settings fill themselves in, and refuse what it does not offer', () => {
+  assert.deepEqual(settingsFor('eq', {}), { exercise: 'match', source: 'mix' });
+  assert.deepEqual(settingsFor('eq', { exercise: 'fix' }), { exercise: 'fix', source: 'mix' });
+  assert.deepEqual(settingsFor('eq', { exercise: 'nonsense' }), { exercise: 'match', source: 'mix' });
+  assert.deepEqual(settingsFor('rhythm', {}), { tempo: '84' });
+});
+
 /* --- the daily ----------------------------------------------------------- */
 
-test('a daily is per mode, per tier, per UTC day', () => {
+test('a daily is per mode, per tier, per exercise, per UTC day', () => {
   const day = new Date('2026-09-21T08:00:00Z');
   const later = new Date('2026-09-21T23:59:00Z');
   const tomorrow = new Date('2026-09-22T00:01:00Z');
 
-  const seedFor = (mode, tier, when) => makePuzzle({ mode, tier, seed: dailySeed(mode, tier, when) });
+  const daily = (mode, tier, when, settings = {}) =>
+    makePuzzle({ mode, tier, settings, seed: dailySeed(mode, tier, settings, when) });
 
-  assert.deepEqual(seedFor('eq', 'easy', day).answer, seedFor('eq', 'easy', later).answer,
+  assert.deepEqual(daily('eq', 'easy', day).answer, daily('eq', 'easy', later).answer,
     'the same day is the same puzzle, wherever you are in it');
-  assert.notDeepEqual(seedFor('eq', 'easy', day).answer, seedFor('eq', 'easy', tomorrow).answer);
-  assert.notDeepEqual(seedFor('eq', 'easy', day).answer, seedFor('eq', 'medium', day).answer,
+  assert.notDeepEqual(daily('eq', 'easy', day).answer, daily('eq', 'easy', tomorrow).answer);
+  assert.notDeepEqual(daily('eq', 'easy', day).answer, daily('eq', 'medium', day).answer,
     'a tier is its own puzzle');
-  assert.notEqual(dailySeed('eq', 'easy', day), dailySeed('rhythm', 'easy', day),
+  assert.notEqual(dailySeed('eq', 'easy', {}, day), dailySeed('rhythm', 'easy', {}, day),
     'so is a mode');
+
+  // Matching a target and curing a fault are different exercises, so each has
+  // its own daily rather than two views of one.
+  assert.notEqual(dailySeed('eq', 'easy', { exercise: 'match' }, day),
+                  dailySeed('eq', 'easy', { exercise: 'fix' }, day));
 
   assert.equal(dayKey(day), '2026-09-21');
   assert.equal(puzzleNumber(tomorrow) - puzzleNumber(day), 1);
@@ -171,16 +159,32 @@ test('the seeded PRNG is deterministic and stays in range', () => {
 test('puzzles spread across everything a tier offers', () => {
   for (const [mode, spec] of Object.entries(MODES)) {
     for (const tier of Object.keys(spec.tiers)) {
+      const rounds = 500;
       const seen = new Map();
-      for (let i = 0; i < 500; i += 1) {
+      for (let i = 0; i < rounds; i += 1) {
         const { answer } = makePuzzle({ mode, tier, seed: `spread-${mode}-${tier}-${i}` });
         for (const slot of spec.slots(tier)) {
-          if (!seen.has(slot.id)) seen.set(slot.id, new Set());
-          seen.get(slot.id).add(answer[slot.id]);
+          if (!seen.has(slot.id)) seen.set(slot.id, new Map());
+          const counts = seen.get(slot.id);
+          counts.set(answer[slot.id], (counts.get(answer[slot.id]) ?? 0) + 1);
         }
       }
+
       for (const slot of spec.slots(tier)) {
-        assert.equal(seen.get(slot.id).size, slot.options.length,
+        const counts = seen.get(slot.id);
+
+        if (slot.kind === 'range') {
+          // A control is not a list to get through, and some exercises use a
+          // narrow part of it on purpose - a corrective cut lives where the
+          // fault lives. What has to be true is that it moves, and that no one
+          // answer comes up so often that the daily is the same every day.
+          assert.ok(counts.size > 1, `${mode}/${tier}/${slot.id} never moves`);
+          assert.ok(Math.max(...counts.values()) < rounds * 0.6,
+            `${mode}/${tier}/${slot.id} keeps landing on the same value`);
+          continue;
+        }
+
+        assert.equal(counts.size, slot.options.length,
           `${mode}/${tier}/${slot.id} never offers some of its answers`);
       }
     }
@@ -199,15 +203,15 @@ test('chords still move their root about, though it is never guessed', () => {
 /* --- sharing ------------------------------------------------------------- */
 
 test('the share grid names the mode, counts the guesses and hides the answer', () => {
-  const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', seed: 'share' });
+  const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', settings: { exercise: 'match' }, seed: 'share' });
   let game = createGame(puzzle, { mode: 'daily', date: new Date('2026-09-21T10:00:00Z') });
   game = submitGuess(game, wrongGuess(puzzle));
   game = submitGuess(game, answerAsGuess(puzzle));
 
   const lines = shareText(game).split('\n');
-  assert.match(lines[0], /^Harmonle EQ #\d+ · Easy 2\/3$/);
-  assert.equal([...lines[2]].length, 3, 'one square per reading');
-  assert.equal(lines[3], '🟩🟩🟩');
+  assert.match(lines[0], /^Harmonle EQ #\d+ · Easy 2\/4$/);
+  assert.equal([...lines[2]].length, 2, 'one square per reading');
+  assert.equal(lines[3], '🟩🟩');
 
   const said = reveal(puzzle);
   assert.ok(!lines.join(' ').includes(said.symbol), 'the grid must not leak the answer');
@@ -219,7 +223,7 @@ test('a lost round shares as X of its allowance', () => {
   for (let i = 0; i < game.allowed; i += 1) game = submitGuess(game, wrongGuess(puzzle, i));
 
   assert.equal(game.status, 'lost');
-  assert.match(shareText(game).split('\n')[0], /Panning #\d+ · Easy X\/2/);
+  assert.match(shareText(game).split('\n')[0], /Panning #\d+ · Easy X\/3/);
 });
 
 test('a guess count is never more than the answers to choose from', () => {

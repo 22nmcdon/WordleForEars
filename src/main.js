@@ -1,6 +1,7 @@
 import { MODES, MODE_IDS, modeOf } from './modes/index.js';
 import {
   createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal, guessesFor,
+  settingsFor, startingGuess,
 } from './game.js';
 import { Engine } from './audio.js';
 import { getStats, recordGame, dailyResult, weakestKind, resetStats } from './stats.js';
@@ -31,17 +32,14 @@ const ui = {
   playing: 'daily', // 'daily' | 'practice'
   mode: 'chords',
   tier: 'easy',
-  setting: {}, // per mode, so switching back finds it as you left it
+  chosen: {}, // settings, per mode, so switching back finds them as you left them
   guess: {},
   game: null,
   plays: 0,
 };
 
 const mode = () => modeOf(ui.mode);
-const settingOf = (id) => {
-  const spec = MODES[id].setting;
-  return spec ? (ui.setting[id] ?? spec.options[0].id) : null;
-};
+const settings = () => settingsFor(ui.mode, ui.chosen[ui.mode] ?? {});
 
 /* ---------- setup row ---------- */
 
@@ -68,16 +66,16 @@ function fillTiers() {
   $('#tier').value = ui.tier;
 }
 
-function fillSetting() {
-  const spec = mode().setting;
-  $('#settingField').hidden = !spec;
-  if (!spec) return;
-
-  $('#settingLabel').textContent = spec.label;
-  $('#setting').innerHTML = spec.options
-    .map((option) => `<option value="${option.id}">${option.label}</option>`)
-    .join('');
-  $('#setting').value = settingOf(ui.mode);
+function fillSettings() {
+  const chosen = settings();
+  $('#settings').innerHTML = (mode().settings ?? []).map((setting) => `
+    <label class="field">
+      <span class="field-label">${setting.label}</span>
+      <select data-setting="${setting.id}">${setting.options
+        .map((option) => `<option value="${option.id}"`
+          + `${option.id === chosen[setting.id] ? ' selected' : ''}>${option.label}</option>`)
+        .join('')}</select>
+    </label>`).join('');
 }
 
 /* ---------- the picker ---------- */
@@ -110,14 +108,74 @@ function chip(slotId, option) {
   return button;
 }
 
+/**
+ * One control: a slider, its value written out beside it, and its own name.
+ *
+ * This is the half that makes the production modes a tool rather than a quiz -
+ * the same thing you would reach for in a session, with the same units on it,
+ * and audible before you commit to it.
+ */
+function control(slot) {
+  const row = document.createElement('div');
+  row.className = 'control';
+
+  const name = document.createElement('label');
+  name.className = 'control-name';
+  name.textContent = slot.label;
+  name.htmlFor = `dial-${slot.id}`;
+  row.appendChild(name);
+
+  const readout = document.createElement('output');
+  readout.className = 'control-value';
+  readout.id = `read-${slot.id}`;
+  row.appendChild(readout);
+
+  const dial = document.createElement('input');
+  dial.type = 'range';
+  dial.id = `dial-${slot.id}`;
+  dial.className = 'dial';
+  dial.dataset.dial = slot.id;
+  // A log control is dialled in log space, so an octave is the same distance
+  // wherever you are on it - which is how the ear hears frequency and ratio.
+  dial.min = slot.log ? Math.log2(slot.min) : slot.min;
+  dial.max = slot.log ? Math.log2(slot.max) : slot.max;
+  dial.step = slot.log ? 0.02 : slot.step;
+  dial.value = slot.log ? Math.log2(ui.guess[slot.id]) : ui.guess[slot.id];
+  dial.setAttribute('aria-label', slot.label);
+  row.appendChild(dial);
+
+  const ends = document.createElement('div');
+  ends.className = 'control-ends';
+  ends.innerHTML = `<span>${slot.format(slot.min)}</span><span>${slot.format(slot.max)}</span>`;
+  row.appendChild(ends);
+
+  return row;
+}
+
+const dialValue = (slot, raw) => {
+  const value = slot.log ? 2 ** Number(raw) : Number(raw);
+  return slot.log ? value : Math.round(value / slot.step) * slot.step;
+};
+
 function buildPicker() {
   const picker = $('#picker');
   picker.textContent = '';
-  ui.guess = {};
+
+  // Chips are cleared between guesses; controls are not. A producer works from
+  // where they got to last time, not from the middle of the range again.
+  const dialled = startingGuess(ui.mode, ui.tier);
+  ui.guess = { ...dialled, ...Object.fromEntries(
+    Object.entries(ui.guess).filter(([id]) => id in dialled)) };
 
   for (const slot of mode().slots(ui.tier)) {
     const group = document.createElement('div');
     group.className = 'picker-group';
+
+    if (slot.kind === 'range') {
+      group.appendChild(control(slot));
+      picker.appendChild(group);
+      continue;
+    }
 
     const label = document.createElement('p');
     label.className = 'eyebrow';
@@ -133,6 +191,8 @@ function buildPicker() {
     group.appendChild(options);
     picker.appendChild(group);
   }
+
+  syncPicker();
 }
 
 function syncPicker() {
@@ -142,17 +202,26 @@ function syncPicker() {
   }
 
   const slots = mode().slots(ui.tier);
+
+  for (const slot of slots) {
+    if (slot.kind !== 'range') continue;
+    const readout = document.getElementById(`read-${slot.id}`);
+    if (readout) readout.textContent = slot.format(ui.guess[slot.id]);
+  }
+
   const complete = slots.every((slot) => ui.guess[slot.id] !== undefined);
   const ready = complete && ui.game.status === 'playing';
+  const dialling = slots.some((slot) => slot.kind === 'range');
 
   $('#submit').disabled = !ready;
   $('#submit').textContent = ready
-    ? `Guess ${slots.map((slot) => label(slot, ui.guess[slot.id])).join(' · ')}`
+    ? `${dialling ? 'Lock in' : 'Guess'} ${slots.map((slot) => label(slot, ui.guess[slot.id])).join(' · ')}`
     : slots.length > 1 ? 'Pick one of each' : 'Submit guess';
 }
 
-const label = (slot, optionId) => {
-  const option = slot.options.find((o) => o.id === optionId);
+const label = (slot, value) => {
+  if (slot.kind === 'range') return slot.format(value);
+  const option = slot.options.find((o) => o.id === value);
   return option ? option.symbol : '';
 };
 
@@ -162,7 +231,7 @@ function buildClue() {
   const row = $('#clue');
   row.textContent = '';
 
-  for (const clue of mode().clues(ui.tier, settingOf(ui.mode))) {
+  for (const clue of mode().clues(ui.tier, settings())) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = clue.primary ? 'play-btn' : 'link-btn';
@@ -183,12 +252,19 @@ function buildClue() {
 }
 
 function playClue(id) {
-  const clues = mode().clues(ui.tier, settingOf(ui.mode));
+  const clues = mode().clues(ui.tier, settings());
   const clue = clues.find((c) => c.id === id) ?? clues[0];
 
   engine.ensure();
   engine.stop();
-  mode().play(engine, ui.game.puzzle, clue.id, settingOf(ui.mode), ui.tier);
+  mode().play(engine, {
+    puzzle: ui.game.puzzle,
+    clue: clue.id,
+    settings: settings(),
+    tier: ui.tier,
+    // What the controls are on right now, so "play yours" is yours.
+    guess: { ...ui.guess },
+  });
 
   ui.plays += 1;
   $('#plays').textContent = ui.plays === 1 ? 'played once' : `played ${ui.plays} times`;
@@ -197,12 +273,12 @@ function playClue(id) {
 /* ---------- lifecycle ---------- */
 
 function startGame({ fresh = false } = {}) {
-  const setting = settingOf(ui.mode);
+  const chosen = settings();
   const seed = ui.playing === 'daily'
-    ? dailySeed(ui.mode, ui.tier)
+    ? dailySeed(ui.mode, ui.tier, chosen)
     : practiceSeed(ui.mode, ui.tier, fresh ? Math.random() : ui.tier);
 
-  const puzzle = makePuzzle({ mode: ui.mode, tier: ui.tier, setting, seed });
+  const puzzle = makePuzzle({ mode: ui.mode, tier: ui.tier, settings: chosen, seed });
   ui.game = createGame(puzzle, { mode: ui.playing });
   ui.plays = 0;
 
@@ -244,7 +320,11 @@ function onSubmit() {
   }
   if (next.guesses.length === before.guesses.length) return;
 
-  ui.guess = {};
+  // Chips start again; controls stay where they were put, because the next
+  // attempt is an adjustment of this one.
+  ui.guess = Object.fromEntries(
+    Object.entries(ui.guess).filter(([id]) =>
+      mode().slots(ui.tier).find((slot) => slot.id === id)?.kind === 'range'));
 
   if (next.status !== 'playing') {
     recordGame(next);
@@ -275,7 +355,7 @@ function finish(game, { replay = true } = {}) {
   played.appendChild(symbol);
   played.appendChild(document.createTextNode(answer.name ? ` — ${answer.name}.` : '.'));
 
-  if (replay) playClue(mode().clues(ui.tier, settingOf(ui.mode))[0].id);
+  if (replay) playClue(mode().clues(ui.tier, settings())[0].id);
 }
 
 /* ---------- rendering ---------- */
@@ -343,15 +423,26 @@ function render() {
   syncPicker();
 }
 
-/** What a row will look like before one has been played. */
+/**
+ * What a row will look like before one has been played.
+ *
+ * A control's cell is already a reading - "0.4 oct low" - so a mode made of
+ * controls returns one cell per control. Chips are not: the cell repeats the
+ * pick, so those modes add a reading of their own beside it. Getting this
+ * wrong shows up as a column on the empty board that no guess ever fills.
+ */
+const dialling = (slots) => slots.some((slot) => slot.kind === 'range');
+
+const extraReading = (slots) => !dialling(slots) || slots.some((slot) => slot.extraReading);
+
 function previewCells(slots) {
-  const cells = slots.map(() => ({ state: 'blank', text: '' }));
-  // Every mode adds one reading of its own beyond what was picked.
-  cells.push({ state: 'blank', text: '', narrow: true });
+  const cells = slots.map((slot) => ({ state: 'blank', text: '', narrow: slot.narrowReading }));
+  if (extraReading(slots)) cells.push({ state: 'blank', text: '', narrow: true });
   return cells;
 }
 
-const headings = (slots) => slots.map((slot) => slot.heading ?? slot.id).concat(['close']);
+const headings = (slots) =>
+  slots.map((slot) => slot.heading ?? slot.id).concat(extraReading(slots) ? ['close'] : []);
 
 const columns = (cells) => cells.map((cell) => (cell.narrow ? '0.45fr' : '1fr')).join(' ');
 
@@ -415,10 +506,9 @@ function fillHelp() {
   $('#helpMode').textContent = mode().label;
   $('#helpLede').textContent = mode().lede;
 
-  const clues = mode().clues(ui.tier, settingOf(ui.mode));
+  const clues = mode().clues(ui.tier, settings());
   const slots = mode().slots(ui.tier);
   const tier = mode().tiers[ui.tier];
-  const spec = mode().setting;
 
   const entries = [
     ['Press ' + clues[0].label.toLowerCase() + ', then name what you heard.',
@@ -426,14 +516,18 @@ function fillHelp() {
        ? `${clues.slice(1).map((c) => c.label).join(' and ')} ${clues.length > 2 ? 'are' : 'is'} there `
          + 'to compare against. Play it as many times as you like.'
        : 'Play it as many times as you like.'],
-    [slots.length > 1 ? 'Two things to name.' : 'One thing to name.',
+    [slots.some((slot) => slot.kind === 'range')
+      ? (slots.length > 1 ? `${slots.length} controls to dial.` : 'One control to dial.')
+      : (slots.length > 1 ? 'Two things to name.' : 'One thing to name.'),
      slots.map((slot) => slot.label.replace(/\?$/, '')).join(', and ')
        + `. ${tier.guesses} ${tier.guesses === 1 ? 'guess' : 'guesses'} on ${tier.label}.`],
   ];
 
-  if (spec) {
+  for (const spec of mode().settings ?? []) {
     entries.push([`${spec.label}: ${spec.options.map((o) => o.label).join(', ')}.`,
-      'Up in the setup row, and it changes what you are listening to rather than how hard it is.']);
+      spec.id === 'exercise'
+        ? 'Two different exercises, not two views of one - each has its own daily.'
+        : 'Up in the setup row, and it changes what you are listening to rather than how hard it is.']);
   }
 
   $('#helpList').innerHTML = entries
@@ -474,7 +568,7 @@ function wire() {
     ui.mode = pill.dataset.train;
     syncModes();
     fillTiers();
-    fillSetting();
+    fillSettings();
     startGame();
   });
 
@@ -488,15 +582,20 @@ function wire() {
     ui.mode = next;
     syncModes();
     fillTiers();
-    fillSetting();
+    fillSettings();
     startGame();
     document.querySelector(`[data-train="${next}"]`).focus();
   });
   $('#tier').addEventListener('change', (e) => { ui.tier = e.target.value; startGame(); });
-  $('#setting').addEventListener('change', (e) => {
-    ui.setting[ui.mode] = e.target.value;
-    // The setting is part of what the clue sounds like, so the round restarts
-    // rather than changing under a board that was scored against the old one.
+  $('#settings').addEventListener('change', (e) => {
+    const select = e.target.closest('[data-setting]');
+    if (!select) return;
+
+    ui.chosen[ui.mode] = { ...ui.chosen[ui.mode], [select.dataset.setting]: select.value };
+    // A setting is part of what the clue sounds like - and an exercise is part
+    // of what the answer is - so the round starts again rather than changing
+    // under a board that was scored against the old one.
+    fillSettings();
     startGame();
   });
 
@@ -504,6 +603,15 @@ function wire() {
     const chosen = e.target.closest('[data-option]');
     if (!chosen) return;
     ui.guess[chosen.dataset.slot] = chosen.dataset.option;
+    syncPicker();
+  });
+
+  $('#picker').addEventListener('input', (e) => {
+    const dial = e.target.closest('[data-dial]');
+    if (!dial) return;
+
+    const slot = mode().slots(ui.tier).find((s) => s.id === dial.dataset.dial);
+    ui.guess[slot.id] = dialValue(slot, dial.value);
     syncPicker();
   });
 
@@ -537,7 +645,7 @@ function wire() {
     if (e.target.matches('input, select, textarea') || document.querySelector('dialog[open]')) return;
     if (e.code === 'Space') {
       e.preventDefault();
-      playClue(mode().clues(ui.tier, settingOf(ui.mode))[0].id);
+      playClue(mode().clues(ui.tier, settings())[0].id);
     }
     if (e.key === 'Enter' && !$('#submit').disabled) onSubmit();
   });
@@ -545,7 +653,7 @@ function wire() {
 
 fillModes();
 fillTiers();
-fillSetting();
+fillSettings();
 wire();
 startGame();
 

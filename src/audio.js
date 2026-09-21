@@ -198,12 +198,13 @@ export class Engine {
   /* ---------- clues ---------- */
 
   /** Play notes together, or one after another. */
-  playNotes(notes, { arpeggio = false, duration = 2.4, dest = null, at = null } = {}) {
+  playNotes(notes, { arpeggio = false, duration = 2.4, dest = null, at = null, velocity = 1 } = {}) {
     this.ensure();
     const start = at ?? this.start;
     const step = arpeggio ? 0.34 : 0.012; // a tiny spread keeps a block chord human
     notes.forEach((midi, i) => {
-      this.note(midi, start + i * step, arpeggio ? duration * 0.7 : duration, { dest, velocity: i === 0 ? 1 : 0.85 });
+      this.note(midi, start + i * step, arpeggio ? duration * 0.7 : duration,
+                { dest, velocity: velocity * (i === 0 ? 1 : 0.85) });
     });
     return start;
   }
@@ -217,7 +218,7 @@ export class Engine {
    * there is less going on and nothing masking it. `drums` is transients only,
    * for anything being judged on how it handles them.
    */
-  playBed(kind, { seconds = 4, dest = null, at = null, bpm = 96 } = {}) {
+  playBed(kind, { seconds = 4, dest = null, at = null, bpm = 96, uneven = 0 } = {}) {
     this.ensure();
     const start = at ?? this.start;
     const beat = 60 / bpm;
@@ -225,26 +226,33 @@ export class Engine {
     const chord = [48, 55, 60, 64, 67]; // Cm-ish spread: root, fifth, octave, third
     const bass = [36, 36, 43, 41];
 
+    // `uneven` is how many decibels the quiet beats sit below the loud ones -
+    // the fault a compressor is asked to even out. Beat by beat rather than bar
+    // by bar, so the unevenness is inside the phrase where it is obvious.
+    const quiet = 10 ** (-uneven / 20);
+
     for (let bar = 0; bar < bars; bar += 1) {
       const barAt = start + bar * beat * 4;
 
       for (let step = 0; step < 8; step += 1) {
         const when = barAt + step * beat * 0.5;
+        const swing = uneven && Math.floor(step / 2) % 2 === 1 ? quiet : 1;
 
         if (kind !== 'instrument') {
-          if (step === 0 || step === 5) this.drum('kick', when, { dest, level: 1 });
-          if (step === 2 || step === 6) this.drum('snare', when, { dest });
-          if (kind !== 'drums') this.drum('hat', when, { dest, level: step % 2 ? 0.5 : 0.8 });
+          if (step === 0 || step === 5) this.drum('kick', when, { dest, level: swing });
+          if (step === 2 || step === 6) this.drum('snare', when, { dest, level: swing });
+          if (kind !== 'drums') this.drum('hat', when, { dest, level: swing * (step % 2 ? 0.5 : 0.8) });
         }
 
         if (kind === 'drums') continue;
 
         // The piano lands on the beat; the bass walks under it.
         if (step % 4 === 0) {
-          this.playNotes(chord, { duration: beat * 1.6, dest, at: when });
+          this.playNotes(chord, { duration: beat * 1.6, dest, at: when, velocity: swing });
         }
         if (kind === 'mix' && step % 2 === 0) {
-          this.note(bass[(bar * 4 + step / 2) % bass.length], when, beat * 0.9, { dest, velocity: 0.9 });
+          this.note(bass[(bar * 4 + step / 2) % bass.length], when, beat * 0.9,
+                    { dest, velocity: 0.9 * swing });
         }
       }
     }

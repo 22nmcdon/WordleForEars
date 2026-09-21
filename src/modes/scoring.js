@@ -38,3 +38,45 @@ export const pick = (rng, list) => list[Math.floor(rng() * list.length)];
 export function combinations(slots) {
   return slots.reduce((total, slot) => total * slot.options.length, 1);
 }
+
+/* --- controls you dial, rather than options you pick --------------------- */
+
+/**
+ * How far a dialled value is from the one being matched, said the way an
+ * engineer would say it: not "wrong" but "3 dB hot", "half an octave low".
+ *
+ * Direction is the point. A production tool that only says "close" leaves you
+ * turning the knob both ways to find out which; saying which way turns the
+ * next attempt into a decision instead of a guess.
+ *
+ * `unit` decides the arithmetic as well as the wording. Frequencies, ratios
+ * and times are heard in ratios, so they are read in octaves ('oct') or as a
+ * factor ('x'); decibels and percentages are differences, and read as such.
+ */
+export function dialled(guess, answer, spec) {
+  const ratioed = spec.unit === 'oct' || spec.unit === 'x';
+  const off = ratioed ? Math.log2(guess / answer) : guess - answer;
+  const away = Math.abs(off);
+
+  const state = away <= spec.hit ? HIT : away <= spec.near ? NEAR : MISS;
+  const amount = spec.unit === 'oct' ? `${away.toFixed(1)} oct`
+    : spec.unit === 'x' ? `${(2 ** away).toFixed(1)}×`
+    : `${away.toFixed(spec.decimals ?? 0)} ${spec.unit}`;
+
+  return {
+    state,
+    text: state === HIT ? 'spot on' : `${amount} ${off < 0 ? spec.below : spec.above}`,
+  };
+}
+
+/** A value on a log scale, from a seeded number in 0..1. */
+export const logPick = (rng, low, high) => low * (high / low) ** rng();
+
+/** Rounded to a step, so an answer is a number a person could have dialled. */
+export const toStep = (value, step) => Math.round(value / step) * step;
+
+/** Frequencies land on the third-octave grid an engineer actually works on. */
+export function toThirdOctave(hz) {
+  const steps = Math.round(Math.log2(hz / 1000) * 3);
+  return 1000 * 2 ** (steps / 3);
+}

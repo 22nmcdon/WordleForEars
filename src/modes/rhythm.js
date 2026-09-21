@@ -49,7 +49,7 @@ export default {
                ['eighths', 'swing', 'charleston', 'clave32', 'clave23', 'three', 'four']),
   },
 
-  setting: {
+  settings: [{
     id: 'tempo',
     label: 'Tempo',
     options: [
@@ -57,7 +57,7 @@ export default {
       { id: '104', label: '104 bpm' },
       { id: '132', label: '132 bpm' },
     ],
-  },
+  }],
 
   slots(tierId) {
     return [{
@@ -93,8 +93,8 @@ export default {
     return [{ id: 'play', label: 'Play the figure', primary: true }];
   },
 
-  play(engine, puzzle, clue, setting) {
-    engine.playPattern(PATTERNS[puzzle.answer.pattern].beats, { bpm: Number(setting) });
+  play(engine, { puzzle, settings }) {
+    engine.playPattern(PATTERNS[puzzle.answer.pattern].beats, { bpm: Number(settings.tempo) });
   },
 
   reveal(answer) {
