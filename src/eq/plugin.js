@@ -15,11 +15,23 @@ const GRID_HZ = [30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10000, 2000
 const LABEL_HZ = [50, 100, 500, 1000, 5000, 10000];
 const GRID_DB = [-12, -6, 0, 6, 12];
 
+/**
+ * A colour per band, laid out the way the spectrum itself reads: warm at the
+ * bottom, cool at the top. Every one is a token the page already owns, so the
+ * display stays in the same family as everything around it.
+ *
+ * They tint a region rather than mark a verdict - the fills sit at a fifth of
+ * their strength, under a curve that is drawn in ink - so nothing here
+ * competes with the three colours the attempts are read in.
+ */
+const BAND_TINTS = ['--rust', '--blush-deep', '--gold', '--approach', '--sage', '--enclosure'];
+
 /** The colours the curve is drawn in, read off the page so the mode follows it. */
 function palette(el) {
   const style = getComputedStyle(el);
   const read = (name) => style.getPropertyValue(name).trim();
   return {
+    tints: BAND_TINTS.map(read),
     ink: read('--charcoal'),
     line: read('--line'),
     // On the display, which is charcoal, rather than on the page.
@@ -364,6 +376,7 @@ export class EQPlugin {
 
     this.drawGrid(c, width, height, ink);
     this.drawSpectrum(c, width, height, ink);
+    this.drawRegions(c, width, height, ink);
     if (this.target) this.drawCurve(c, width, height, this.target, ink.sage, 2, [6, 4]);
     this.drawCurve(c, width, height, this.bands, ink.accent, 2.5);
     this.drawNodes(c, width, height, ink);
@@ -430,6 +443,54 @@ export class EQPlugin {
     c.globalAlpha = 1;
   }
 
+  /**
+   * What each band is doing, on its own, shaded from the line it moves away
+   * from - so a curve made of several bands can be read as the bands that
+   * made it rather than as one shape nobody can take apart.
+   *
+   * The band being worked on is held a little stronger than the rest, which
+   * saves hunting for which region belongs to the handle under the pointer.
+   */
+  drawRegions(c, width, height, ink) {
+    const points = Math.max(120, Math.round(width / 3));
+    const frequencies = logFrequencies(points, LOW, HIGH);
+    const zero = toY(0, height);
+
+    this.bands.forEach((band, i) => {
+      if (band.on === false) return;
+
+      const curve = curveOf([band], frequencies, this.rate());
+      let moves = false;
+
+      c.beginPath();
+      c.moveTo(0, zero);
+      for (let n = 0; n < points; n += 1) {
+        if (Math.abs(curve[n]) > 0.05) moves = true;
+        c.lineTo((n / (points - 1)) * width, toY(curve[n], height));
+      }
+      c.lineTo(width, zero);
+      c.closePath();
+
+      // A band sitting at unity has no region: there is nothing between it
+      // and the line.
+      if (!moves) return;
+
+      const tint = ink.tints[i % ink.tints.length];
+
+      c.fillStyle = tint;
+      c.globalAlpha = i === this.selected ? 0.36 : 0.15;
+      c.fill();
+
+      // Its own edge, drawn faintly. Without it, two regions that overlap are
+      // one wash and there is no telling which band is doing what.
+      c.strokeStyle = tint;
+      c.globalAlpha = i === this.selected ? 0.9 : 0.45;
+      c.lineWidth = 1;
+      c.stroke();
+      c.globalAlpha = 1;
+    });
+  }
+
   drawCurve(c, width, height, bands, colour, weight, dash = []) {
     const points = Math.max(160, Math.round(width / 2));
     const frequencies = logFrequencies(points, LOW, HIGH);
@@ -457,15 +518,18 @@ export class EQPlugin {
       const y = toY(this.curveAt(band.frequency), height);
       const chosen = i === this.selected;
 
+      const tint = ink.tints[i % ink.tints.length];
+
       c.beginPath();
       c.arc(x, y, chosen ? 11 : 9, 0, Math.PI * 2);
-      c.fillStyle = band.on ? ink.accent : ink.paper;
-      c.strokeStyle = band.on ? ink.accent : ink.soft;
+      // The handle wears its region's colour, so the two are one thing.
+      c.fillStyle = band.on ? tint : 'rgba(36, 31, 29, 0.75)';
+      c.strokeStyle = band.on ? ink.paper : tint;
       c.lineWidth = chosen ? 3 : 1.5;
       c.fill();
       c.stroke();
 
-      c.fillStyle = band.on ? ink.paper : ink.soft;
+      c.fillStyle = band.on ? ink.paper : tint;
       c.font = '600 9px system-ui, sans-serif';
       c.textAlign = 'center';
       c.textBaseline = 'middle';

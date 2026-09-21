@@ -516,7 +516,21 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   color: var(--text-soft);
   font-variant-numeric: tabular-nums;
 }
+.band-btn { border-left-width: 3px; }
+/* Each band's own colour, the same one its region is shaded in. */
+.band-btn[data-band="0"] { border-left-color: var(--rust); }
+.band-btn[data-band="1"] { border-left-color: var(--blush-deep); }
+.band-btn[data-band="2"] { border-left-color: var(--gold); }
+.band-btn[data-band="3"] { border-left-color: var(--approach); }
+.band-btn[data-band="4"] { border-left-color: var(--sage); }
+.band-btn[data-band="5"] { border-left-color: var(--enclosure); }
 .band-btn[aria-pressed="true"] { background: var(--charcoal); border-color: var(--charcoal); }
+.band-btn[aria-pressed="true"][data-band="0"] { border-left-color: var(--rust); }
+.band-btn[aria-pressed="true"][data-band="1"] { border-left-color: var(--blush-deep); }
+.band-btn[aria-pressed="true"][data-band="2"] { border-left-color: var(--gold); }
+.band-btn[aria-pressed="true"][data-band="3"] { border-left-color: var(--approach); }
+.band-btn[aria-pressed="true"][data-band="4"] { border-left-color: var(--sage); }
+.band-btn[aria-pressed="true"][data-band="5"] { border-left-color: var(--enclosure); }
 .band-btn[aria-pressed="true"] .band-short,
 .band-btn[aria-pressed="true"] .band-hz { color: var(--cream); }
 
