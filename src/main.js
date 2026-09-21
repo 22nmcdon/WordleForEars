@@ -411,7 +411,14 @@ buildKeyboard();
 wire();
 startGame();
 
-if (!localStorage.getItem('harmonle.seenHelp')) {
+// A first visit gets the rules. Failing open is the right way round: a private
+// window forgets and shows them again, where guessing "seen" would hide the one
+// thing a first visitor needs.
+function seenHelp() {
+  try { return localStorage.getItem('harmonle.seenHelp') === '1'; } catch { return false; }
+}
+
+if (!seenHelp()) {
   $('#help').showModal();
   try { localStorage.setItem('harmonle.seenHelp', '1'); } catch { /* private window */ }
 }

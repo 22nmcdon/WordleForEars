@@ -18,7 +18,12 @@ app uses ES modules, which browsers refuse to load over `file://`.)
 
 ```bash
 npm test            # node --test — pure game/theory/stats logic
+npm run artifact    # bundles the whole app into dist/harmonle.html, one file
 ```
+
+`npm run artifact` folds the stylesheet and the ES modules into a single page so
+it can be published or opened straight off disk. Nothing is minified and nothing
+is rewritten beyond the module keywords, so the bundle reads as the source does.
 
 ## How a round works
 
