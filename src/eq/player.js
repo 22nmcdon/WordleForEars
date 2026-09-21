@@ -1,4 +1,4 @@
-import { averageLift, liftFrequencies } from './filters.js';
+import { averageLift, liftFrequencies, sectionsOf, MOST_SECTIONS } from './filters.js';
 import { averageSpectrum } from './spectrum.js';
 
 /**
@@ -11,9 +11,11 @@ import { averageSpectrum } from './spectrum.js';
  * which is how an A/B on a desk works - the two paths stay in step to the
  * sample, so what you hear when you flip is the processing and nothing else.
  *
- * A chain is six biquads in series that are never added or removed, only
- * retuned. A band that is off is left transparent rather than unplugged,
- * because rebuilding the graph under a running loop clicks.
+ * A chain is a fixed run of biquads that are never added or removed, only
+ * retuned - four per band, because the steepest cut on offer is a cascade of
+ * four. A band that is off, and a section its slope does not need, are left
+ * transparent rather than unplugged: rebuilding the graph under a running
+ * loop clicks.
  */
 export class EQPlayer {
   constructor(engine, strip) {
@@ -31,7 +33,7 @@ export class EQPlayer {
 
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 4096;
-    this.analyser.smoothingTimeConstant = 0.72;
+    this.analyser.smoothingTimeConstant = this.ballistics ?? 0.72;
     this.analyser.connect(this.engine.out);
 
     this.mine = this.chain(ctx);
@@ -66,16 +68,22 @@ export class EQPlayer {
   }
 
   chain(ctx) {
-    const filters = this.strip.map((band) => {
+    // Four biquads per band, whether or not the band needs four. A cut at
+    // 48 dB/oct is a cascade of four, and a graph that grew and shrank as the
+    // slope changed would be a graph rebuilt under a running loop. The unused
+    // ones are held out of circuit instead, which costs a multiply each and
+    // nothing audible.
+    const sections = this.strip.map(() => Array.from({ length: MOST_SECTIONS }, () => {
       const filter = ctx.createBiquadFilter();
       // Built out of circuit: a peak with no gain passes everything through.
       filter.type = 'peaking';
-      filter.frequency.value = band.frequency;
-      filter.Q.value = band.q;
+      filter.frequency.value = 1000;
+      filter.Q.value = 1;
       filter.gain.value = 0;
       return filter;
-    });
+    }));
 
+    const filters = sections.flat();
     for (let i = 0; i < filters.length - 1; i += 1) filters[i].connect(filters[i + 1]);
 
     // Auto gain: whatever the curve adds overall, this takes back off, so the
@@ -87,7 +95,7 @@ export class EQPlayer {
     gain.gain.value = 0;
     filters[filters.length - 1].connect(trim).connect(gain).connect(this.analyser);
 
-    return { input: filters[0], filters, trim, gain };
+    return { input: filters[0], sections, trim, gain };
   }
 
   /**
@@ -105,13 +113,24 @@ export class EQPlayer {
     chain.trim.gain.setTargetAtTime(10 ** (-lift / 20), at, 0.02);
 
     bands.forEach((band, i) => {
-      const filter = chain.filters[i];
-      const off = band.on === false;
+      // What this band is actually made of - one biquad, or up to four of
+      // them for a steep cut. Whatever is left over is parked.
+      const sections = band.on === false ? [] : sectionsOf(band);
 
-      filter.type = off ? 'peaking' : band.type;
-      filter.frequency.setTargetAtTime(band.frequency, at, 0.01);
-      filter.Q.setTargetAtTime(band.q, at, 0.01);
-      filter.gain.setTargetAtTime(off ? 0 : band.gain, at, 0.01);
+      chain.sections[i].forEach((filter, s) => {
+        const section = sections[s];
+
+        if (!section) {
+          filter.type = 'peaking';
+          filter.gain.setTargetAtTime(0, at, 0.01);
+          return;
+        }
+
+        filter.type = section.type;
+        filter.frequency.setTargetAtTime(section.frequency, at, 0.01);
+        filter.Q.setTargetAtTime(section.q, at, 0.01);
+        filter.gain.setTargetAtTime(section.gain ?? 0, at, 0.01);
+      });
     });
   }
 
@@ -216,6 +235,18 @@ export class EQPlayer {
 
   get playing() {
     return this.source !== null;
+  }
+
+  /**
+   * How fast the analyser follows what it is given.
+   *
+   * Fast catches the transients, slow shows the balance, and they are two
+   * different questions about the same sound - which is why every analyser
+   * ever built has this switch on it.
+   */
+  setBallistics(value) {
+    this.ballistics = value;
+    if (this.analyser) this.analyser.smoothingTimeConstant = value;
   }
 
   /** The spectrum, in dB, for drawing behind the curve. */

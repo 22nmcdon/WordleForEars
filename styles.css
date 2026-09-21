@@ -504,6 +504,9 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   /* The pointer is dragging a band, not scrolling the page. */
   touch-action: none;
 }
+/* It takes focus, because the arrow keys move the selected band - so it has
+   to be able to say that it has it. */
+.eq-canvas:focus-visible { outline: 2px solid var(--blush-deep); outline-offset: -2px; }
 
 .eq-bands { display: flex; flex-wrap: wrap; gap: 6px; }
 .band-btn {
@@ -549,10 +552,71 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .band-btn[aria-pressed="true"] .band-short,
 .band-btn[aria-pressed="true"] .band-hz { color: var(--cream); }
 
+/* What kind of band this is, and how steep it is if it is a cut. A row of
+   states, so: pills, the same ones the A/B is made of. */
+.eq-shape {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.pick-row { display: flex; border: 1px solid var(--line); border-radius: 30px; overflow: hidden; }
+.pick-btn {
+  background: none;
+  border: none;
+  padding: 6px 12px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.pick-btn:hover { color: var(--blush-deep); }
+.pick-btn[aria-pressed="true"] { background: var(--charcoal); color: var(--cream); }
+
+/* How to work it, said once and quietly, where the controls are. */
+.eq-hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-soft);
+}
+
+/* The analyser's own settings. They change the picture and nothing else, so
+   they sit apart from the controls that change the sound. */
+.eq-analyser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 .eq-controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px 20px;
+}
+
+/* The readout is a field you can type into, and has to keep looking like a
+   readout: no box, no chrome, just the number - until it is being used. */
+input.knob-value {
+  border: none;
+  border-bottom: 1px solid transparent;
+  background: none;
+  width: 100%;
+  min-width: 0;
+  padding: 0 0 1px;
+}
+input.knob-value:hover { border-bottom-color: var(--line); }
+input.knob-value:focus {
+  outline: none;
+  border-bottom-color: var(--blush-deep);
+  color: var(--blush-deep);
 }
 .knob { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 10px; }
 .knob-name {
@@ -651,6 +715,8 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 @media (max-width: 760px) {
   .eq-display { height: clamp(180px, 30vh, 240px); }
   .eq-controls { grid-template-columns: 1fr; }
+  /* The hint is for a keyboard, and there is not one. */
+  .eq-hint { display: none; }
 }
 
 /* --- the compressor -------------------------------------------------------- */
@@ -739,7 +805,10 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   align-items: center;
   gap: 10px 14px;
 }
-.comp-section {
+/* Names a panel within a plugin - the compressor's detector, the EQ's
+   analyser. Shared, because a second rule for the same thing is a second rule
+   to keep in step. */
+.panel-name {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -755,7 +824,7 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .comp-detector .listen-btn:hover { border-color: var(--blush); color: var(--blush-deep); }
 .comp-detector .listen-btn.is-on { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
 
-.comp-toggle {
+.toggle {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -766,7 +835,7 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   color: var(--text-soft);
   cursor: pointer;
 }
-.comp-toggle input { accent-color: var(--blush-deep); width: 15px; height: 15px; }
+.toggle input { accent-color: var(--blush-deep); width: 15px; height: 15px; }
 
 .comp.is-locked .comp-controls,
 .comp.is-locked .comp-detector { opacity: 0.5; pointer-events: none; }

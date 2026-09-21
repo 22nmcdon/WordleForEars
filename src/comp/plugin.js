@@ -122,12 +122,12 @@ export class CompPlugin {
 
         <div class="comp-detector">
           <div class="comp-detector-head">
-            <span class="comp-section">Detector</span>
+            <span class="panel-name">Detector</span>
             <div class="eq-ab" role="group" aria-label="How the level is measured">
               <button class="ab-btn is-on" type="button" data-detector="peak">Peak</button>
               <button class="ab-btn" type="button" data-detector="rms">RMS</button>
             </div>
-            <label class="comp-toggle" ${keyed ? '' : 'hidden'}>
+            <label class="toggle" ${keyed ? '' : 'hidden'}>
               <input type="checkbox" id="compSidechain"> Key from the ${this.player.key === 'kick' ? 'kick' : 'other track'}
             </label>
             <button class="ab-btn listen-btn" type="button" data-comp="listen" aria-pressed="false">Listen to the key</button>
@@ -141,7 +141,7 @@ export class CompPlugin {
             <button class="ab-btn is-on" type="button" data-hear="mine">Yours</button>
             <button class="ab-btn" type="button" data-hear="theirs" id="compOther">Target</button>
           </div>
-          <label class="comp-toggle">
+          <label class="toggle">
             <input type="checkbox" id="compAuto" checked> Auto gain
           </label>
           <label class="field">

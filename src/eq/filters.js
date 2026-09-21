@@ -28,19 +28,84 @@ export const BAND_TYPES = {
   lowpass: { label: 'Low-pass', short: 'LP', gain: false, resonance: true, contributes: 1 },
 };
 
+/**
+ * How steep a cut is, in decibels per octave.
+ *
+ * Six is missing and it is not an oversight. A 6 dB/oct filter is first
+ * order, and every filter Web Audio will build is second: BiquadFilterNode
+ * has no one-pole type and takes no coefficients of its own. It could be had
+ * from an IIRFilterNode, whose coefficients are fixed at construction - so
+ * moving the corner would mean building a new node under a dragging finger,
+ * sixty times a second, each one starting from no state at all. That is a
+ * click per frame. The three slopes here are the ones a desk actually gives
+ * you, and they are exact.
+ */
+export const SLOPES = [12, 24, 48];
+
+/**
+ * A Butterworth cascade, as the resonance each of its sections needs - in
+ * Web Audio's decibels, which is what its low-pass and high-pass read.
+ *
+ * The useful fact about these numbers is that they multiply to 1/root 2 at
+ * every even order, so the cascade is 3 dB down at its corner whether it is
+ * twelve an octave or forty-eight. Which means the handle maths does not care
+ * about slope at all: a cut still contributes exactly its resonance at its
+ * own corner, and still sits on the curve.
+ */
+export function butterworth(order) {
+  const sections = [];
+  for (let k = 0; k < order / 2; k += 1) {
+    const q = 1 / (2 * Math.cos(((2 * k + 1) * Math.PI) / (2 * order)));
+    sections.push(20 * Math.log10(q));
+  }
+  return sections;
+}
+
+/** Flat, in the decibels a cut's resonance is stated in. */
+export const FLAT_CORNER = 20 * Math.log10(Math.SQRT1_2);
+
+/** The most biquads any one band is built from - a 48 dB/oct cut. */
+export const MOST_SECTIONS = 4;
+
 /** The channel strip, in the order an engineer reads it: low to high. */
 export const STRIP = [
-  // The cuts start at -3, which is a flat corner: in Web Audio's decibels that
-  // is the maximally flat filter every desk calls Butterworth.
-  { id: 'hp', type: 'highpass', frequency: 40, gain: 0, q: -3 },
-  { id: 'ls', type: 'lowshelf', frequency: 120, gain: 0, q: 0.7 },
-  { id: 'p1', type: 'peaking', frequency: 400, gain: 0, q: 1.4 },
-  { id: 'p2', type: 'peaking', frequency: 2000, gain: 0, q: 1.4 },
-  { id: 'hs', type: 'highshelf', frequency: 8000, gain: 0, q: 0.7 },
-  { id: 'lp', type: 'lowpass', frequency: 18000, gain: 0, q: -3 },
+  // The cuts start flat - in Web Audio's decibels, the maximally flat filter
+  // every desk calls Butterworth, which reads -3.0 on the face of it.
+  { id: 'hp', type: 'highpass', frequency: 40, gain: 0, q: FLAT_CORNER, slope: 12 },
+  { id: 'ls', type: 'lowshelf', frequency: 120, gain: 0, q: 0.7, slope: 12 },
+  { id: 'p1', type: 'peaking', frequency: 400, gain: 0, q: 1.4, slope: 12 },
+  { id: 'p2', type: 'peaking', frequency: 2000, gain: 0, q: 1.4, slope: 12 },
+  { id: 'hs', type: 'highshelf', frequency: 8000, gain: 0, q: 0.7, slope: 12 },
+  { id: 'lp', type: 'lowpass', frequency: 18000, gain: 0, q: FLAT_CORNER, slope: 12 },
 ];
 
 export const newStrip = () => STRIP.map((band) => ({ ...band, on: false }));
+
+/** What a band's q means when it becomes this kind of band. */
+export const RESTING_Q = {
+  highpass: FLAT_CORNER, lowpass: FLAT_CORNER, peaking: 1.4, lowshelf: 0.7, highshelf: 0.7,
+};
+
+/**
+ * The biquads a band is actually made of.
+ *
+ * One, for everything but a cut. A cut is a Butterworth cascade, and the
+ * resonance the player dialled goes on its last and sharpest section - which
+ * is where resonance lives in a cascade, and leaves the rest maximally flat.
+ */
+export function sectionsOf(band) {
+  if (!BAND_TYPES[band.type].resonance) return [band];
+
+  const corners = butterworth((band.slope ?? 12) / 6);
+  const resonance = (band.q ?? FLAT_CORNER) - FLAT_CORNER;
+
+  return corners.map((q, i) => ({
+    type: band.type,
+    frequency: band.frequency,
+    gain: 0,
+    q: q + (i === corners.length - 1 ? resonance : 0),
+  }));
+}
 
 /** The six coefficients of one band, normalised so a0 is 1. */
 export function coefficients({ type, frequency, gain, q }, rate) {
@@ -94,9 +159,9 @@ export function coefficients({ type, frequency, gain, q }, rate) {
   return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
 }
 
-/** What one band does at one frequency, in decibels. */
-export function bandGainAt(band, frequency, rate) {
-  const { b0, b1, b2, a1, a2 } = coefficients(band, rate);
+/** What one biquad does at one frequency, in decibels. */
+export function sectionGainAt(coeffs, frequency, rate) {
+  const { b0, b1, b2, a1, a2 } = coeffs;
   const w = (2 * Math.PI * frequency) / rate;
 
   // H(e^jw), written out: cos and sin of one and two steps round the circle.
@@ -110,6 +175,15 @@ export function bandGainAt(band, frequency, rate) {
 
   const magnitude = Math.sqrt((numRe * numRe + numIm * numIm) / (denRe * denRe + denIm * denIm));
   return 20 * Math.log10(magnitude);
+}
+
+/** What one band does at one frequency - every section of it, added up. */
+export function bandGainAt(band, frequency, rate) {
+  let db = 0;
+  for (const section of sectionsOf(band)) {
+    db += sectionGainAt(coefficients(section, rate), frequency, rate);
+  }
+  return db;
 }
 
 /** The whole strip's curve: what the bands come to, band by band, in dB. */
@@ -127,8 +201,13 @@ export function curveOf(bands, frequencies, rate = 48000) {
     // A band sitting at unity is not in the signal path in any audible sense.
     if (BAND_TYPES[band.type].gain && band.gain === 0) continue;
 
-    for (let i = 0; i < frequencies.length; i += 1) {
-      curve[i] += bandGainAt(band, frequencies[i], rate);
+    // Coefficients once per section rather than once per point: a 48 dB/oct
+    // cut is four biquads, and this is called on every move of every knob.
+    for (const section of sectionsOf(band)) {
+      const coeffs = coefficients(section, rate);
+      for (let i = 0; i < frequencies.length; i += 1) {
+        curve[i] += sectionGainAt(coeffs, frequencies[i], rate);
+      }
     }
   }
 
@@ -139,6 +218,16 @@ export function curveOf(bands, frequencies, rate = 48000) {
     display, spelled out where there is room. */
 export const shortHz = (hz) =>
   (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)}k` : String(Math.round(hz)));
+
+/**
+ * A frequency with enough of it left to type back in.
+ *
+ * `shortHz` is for the face of the display, where room is the point and 3.15k
+ * reading as 3.1k costs nothing. In a field somebody has just typed 3k15
+ * into, it costs the thing they typed.
+ */
+export const exactHz = (hz) =>
+  (hz >= 1000 ? `${Number((hz / 1000).toFixed(2))}k` : String(Math.round(hz)));
 
 export const writeHz = (hz) =>
   (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)} kHz` : `${Math.round(hz)} Hz`);

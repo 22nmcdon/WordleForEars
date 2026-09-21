@@ -45,6 +45,20 @@ export default {
      'Drag a band to move it; the wheel over a band is its Q; the buttons under the '
      + 'display turn one on and off. Yours and the other side swap instantly, so you '
      + 'can flip while it runs.'],
+    ['Any band can be any kind of band.',
+     'Peak, shelf or cut, chosen under the display - and a cut can be 12, 24 or 48 dB '
+     + 'an octave. Six bands that can each be anything is a parametric EQ rather than '
+     + 'a tone control.'],
+    ['It can be typed, and it can be nudged.',
+     'The numbers under the sliders are fields: 3.15k, 3150 and 3k15 are all the same '
+     + 'frequency. With the display focused, the arrow keys move the selected band a '
+     + 'semitone and half a decibel at a time, shift makes them fine, and the bracket '
+     + 'keys are Q.'],
+    ['The analyser is a picture, not a reading.',
+     'Tilt it three decibels an octave and a balanced mix reads level instead of '
+     + 'sloping away, so what stands out is what actually stands out. Peak hold catches '
+     + 'the resonance that only shows itself on one note of the bar. Neither changes '
+     + 'the sound or the marking.'],
     ['You are judged on the curve, not the controls.',
      'Two different sets of bands that make the same shape are the same answer - what is '
      + 'compared is what comes out.'],

@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
   BAND_TYPES, STRIP, newStrip, bandGainAt, contributionOf, curveOf,
   averageLift, liftFrequencies, logFrequencies,
+  SLOPES, FLAT_CORNER, RESTING_Q, sectionsOf, butterworth, exactHz,
 } from '../src/eq/filters.js';
 import { averageSpectrum } from '../src/eq/spectrum.js';
+import { EQPlugin } from '../src/eq/plugin.js';
 
 const rate = 48000;
 const on = (band) => ({ gain: 0, q: 1, on: true, ...band });
@@ -97,4 +99,139 @@ test('auto gain is a fair trade: it never rewards boosting', () => {
   }
 
   assert.equal(averageLift(newStrip(), rate, pink).toFixed(6), '0.000000', 'and a flat EQ does neither');
+});
+
+/* --- slopes ---------------------------------------------------------------- */
+
+test('a cut is as steep as the number written on it', () => {
+  for (const slope of SLOPES) {
+    const band = { type: 'highpass', frequency: 1000, gain: 0, q: FLAT_CORNER, slope, on: true };
+
+    // Measured well below the corner, where the asymptote has arrived: an
+    // octave of frequency should cost exactly the decibels on the label.
+    const lower = bandGainAt(band, 1000 / 16, 48000);
+    const upper = bandGainAt(band, 1000 / 8, 48000);
+    const measured = upper - lower;
+
+    assert.ok(Math.abs(measured - slope) < 0.2,
+      `a ${slope} dB/oct cut measured ${measured.toFixed(2)} dB/oct`);
+  }
+});
+
+test('a cut is three decibels down at its corner, however steep it is', () => {
+  // This is what keeps the handle on the curve without the drawing having to
+  // know anything about slope: the section Qs of a Butterworth cascade
+  // multiply to 1/root 2 at every even order.
+  for (const slope of SLOPES) {
+    for (const type of ['highpass', 'lowpass']) {
+      const band = { type, frequency: 500, gain: 0, q: FLAT_CORNER, slope, on: true };
+      assert.ok(Math.abs(bandGainAt(band, 500, 48000) - FLAT_CORNER) < 0.01,
+        `${slope} dB/oct ${type} sits at ${bandGainAt(band, 500, 48000).toFixed(3)} at its corner`);
+    }
+  }
+});
+
+test('resonance is what a cut contributes at its corner, at any slope', () => {
+  for (const slope of SLOPES) {
+    for (const resonance of [-12, FLAT_CORNER, 0, 6, 12]) {
+      const band = { type: 'highpass', frequency: 800, gain: 0, q: resonance, slope, on: true };
+      const there = contributionOf(band, 48000);
+      assert.ok(Math.abs(there - resonance) < 0.01,
+        `${slope} dB/oct with ${resonance.toFixed(1)} dB of resonance contributes ${there.toFixed(3)}`);
+    }
+  }
+});
+
+test('a cut is built from as many biquads as its slope needs, resonance on the last', () => {
+  for (const slope of SLOPES) {
+    const band = { type: 'lowpass', frequency: 2000, gain: 0, q: 9, slope, on: true };
+    const sections = sectionsOf(band);
+
+    assert.equal(sections.length, slope / 12, `${slope} dB/oct wants ${slope / 12} biquads`);
+    for (const section of sections) {
+      assert.equal(section.type, 'lowpass');
+      assert.equal(section.frequency, 2000);
+    }
+
+    // The resonance rides on the sharpest section and the rest stay flat.
+    const last = sections[sections.length - 1];
+    assert.ok(last.q > (sections[0]?.q ?? 0) || sections.length === 1, 'the last section is the sharp one');
+    assert.ok(Math.abs(sections.reduce((sum, s) => sum + s.q, 0) - 9) < 0.01,
+      'the sections together come to the resonance asked for');
+  }
+
+  // Everything else is one biquad, and is itself.
+  for (const type of ['peaking', 'lowshelf', 'highshelf']) {
+    const band = { type, frequency: 1000, gain: 3, q: 1.2, slope: 48, on: true };
+    assert.deepEqual(sectionsOf(band), [band], `a ${type} is one filter, slope or no slope`);
+  }
+});
+
+test('a steep cut that is switched off is still out of the circuit', () => {
+  // The same promise the twelve dB one makes: an off band is not a band
+  // parked somewhere quiet, it is not there at all.
+  const off = { type: 'lowpass', frequency: 15000, gain: 0, q: FLAT_CORNER, slope: 48, on: false };
+  const curve = curveOf([off], [1000, 8000, 12000, 16000], 48000);
+  for (const value of curve) assert.equal(value, 0);
+});
+
+/* --- changing what a band is ---------------------------------------------- */
+
+test('every band type has a resting Q that means something in its own terms', () => {
+  for (const type of Object.keys(BAND_TYPES)) {
+    const resting = RESTING_Q[type];
+    assert.equal(typeof resting, 'number', `${type} has no resting Q`);
+
+    if (BAND_TYPES[type].resonance) {
+      // A cut reads Q as decibels, so its resting value has to be flat - a
+      // peak's 1.4 carried across would be 1.4 dB of ring on the corner.
+      assert.ok(Math.abs(resting - FLAT_CORNER) < 0.01, `${type} should rest flat`);
+    } else {
+      assert.ok(resting > 0.3 && resting < 12, `${type} should rest on a usable Q`);
+    }
+  }
+});
+
+/* --- typing a number in ---------------------------------------------------- */
+
+test('a frequency can be written however an engineer writes it', () => {
+  const read = (text) => EQPlugin.readEntry(text, 'frequency');
+
+  for (const text of ['3150', '3.15k', '3.15 kHz', '3k15', ' 3150 Hz ', '3.15K']) {
+    assert.ok(Math.abs(read(text) - 3150) < 0.5, `"${text}" should be 3150, and read ${read(text)}`);
+  }
+
+  assert.equal(read('80'), 80);
+  assert.equal(read('nonsense'), null, 'what cannot be read leaves the band alone');
+  assert.equal(read(''), null);
+});
+
+test('gains and Qs are read as plain numbers, units and all', () => {
+  assert.equal(EQPlugin.readEntry('-4.5 dB', 'gain'), -4.5);
+  assert.equal(EQPlugin.readEntry('+6', 'gain'), 6);
+  assert.equal(EQPlugin.readEntry('1.25', 'q'), 1.25);
+  assert.equal(EQPlugin.readEntry('  ', 'gain'), null);
+});
+
+test('a Butterworth cascade is flat at its corner at every order', () => {
+  // The fact the whole slope design rests on. The section Qs multiply to
+  // 1/root 2 whatever the order, so the cascade is 3 dB down at its corner
+  // whether it is one biquad or four - which is why the drawing does not have
+  // to know about slope to put a handle on the curve.
+  for (const slope of SLOPES) {
+    const corners = butterworth(slope / 6);
+    const together = corners.reduce((sum, db) => sum + db, 0);
+    assert.ok(Math.abs(together - FLAT_CORNER) < 1e-9,
+      `${slope} dB/oct comes to ${together.toFixed(6)} dB, not ${FLAT_CORNER.toFixed(6)}`);
+    // And they are sorted gentlest first, so the last one is the sharp one.
+    for (let i = 1; i < corners.length; i += 1) assert.ok(corners[i] > corners[i - 1]);
+  }
+});
+
+test('a frequency survives being written down and read back', () => {
+  for (const hz of [20, 80, 315, 1000, 3150, 6300, 12500, 20000]) {
+    const written = exactHz(hz);
+    const read = EQPlugin.readEntry(written, 'frequency');
+    assert.ok(Math.abs(read - hz) < 0.5, `${hz} was written "${written}" and read back ${read}`);
+  }
 });

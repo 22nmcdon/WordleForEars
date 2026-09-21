@@ -1,4 +1,7 @@
-import { BAND_TYPES, averageLift, contributionOf, curveOf, logFrequencies, shortHz } from './filters.js';
+import {
+  BAND_TYPES, SLOPES, RESTING_Q, FLAT_CORNER,
+  averageLift, contributionOf, curveOf, logFrequencies, shortHz, exactHz,
+} from './filters.js';
 import { EQPlayer } from './player.js';
 
 const LOW = 20;
@@ -10,6 +13,39 @@ const toX = (hz, width) => (Math.log2(hz / LOW) / Math.log2(HIGH / LOW)) * width
 const toHz = (x, width) => LOW * (HIGH / LOW) ** (x / width);
 const toY = (db, height) => height / 2 - (db / RANGE) * (height / 2);
 const toDb = (y, height) => ((height / 2 - y) / (height / 2)) * RANGE;
+
+/**
+ * What the analyser is set to show.
+ *
+ * Tilt is the one that matters. Music loses roughly three decibels an octave
+ * on the way up, so an untilted analyser draws every mix as a slope down to
+ * the right and there is no reading to be had from the shape. Tilted, a
+ * balanced mix is level, and what stands out is what actually stands out.
+ *
+ * Ballistics is the analyser's own attack and release: fast shows the
+ * transients, slow shows the balance. They answer different questions, which
+ * is why every analyser has the switch.
+ */
+const TILTS = [
+  { value: 0, label: 'Flat' },
+  { value: 3, label: '3 dB/oct' },
+  { value: 4.5, label: '4.5 dB/oct' },
+];
+
+const BALLISTICS = [
+  { value: 0.45, label: 'Fast' },
+  { value: 0.72, label: 'Medium' },
+  { value: 0.93, label: 'Slow' },
+];
+
+/** How close a handle may come to the wall of the display. */
+const NODE_EDGE = 12;
+
+/** Where the tilt pivots - the middle of the range, and of the ear. */
+const TILT_PIVOT = 1000;
+
+/** How fast a held peak falls back, in decibels per frame. */
+const HOLD_FALL = 0.35;
 
 const GRID_HZ = [30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10000, 20000];
 const LABEL_HZ = [50, 100, 500, 1000, 5000, 10000];
@@ -64,6 +100,9 @@ export class EQPlugin {
     this.target = null; // drawn only once the round is over
     this.player = new EQPlayer(engine, this.bands);
     this.interactive = true;
+    this.tilt = 0;        // decibels per octave added to the drawn spectrum
+    this.holding = false; // whether the peaks are being held
+    this.held = null;     // and where they have got to
 
     this.build();
     this.draw();
@@ -80,10 +119,28 @@ export class EQPlugin {
           <span class="eq-read" id="eqRead"></span>
         </div>
         <div class="eq-display">
-          <canvas class="eq-canvas" id="eqCanvas"></canvas>
+          <canvas class="eq-canvas" id="eqCanvas" tabindex="0"
+                  aria-label="The curve. Arrow keys move the selected band."></canvas>
         </div>
         <div class="eq-bands" id="eqBands"></div>
+        <div class="eq-shape" id="eqShape"></div>
         <div class="eq-controls" id="eqControls"></div>
+        <div class="eq-analyser">
+          <span class="panel-name">Analyser</span>
+          <label class="field">
+            <span class="field-label">Tilt</span>
+            <select id="eqTilt">
+              ${TILTS.map((tilt) => `<option value="${tilt.value}">${tilt.label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Ballistics</span>
+            <select id="eqBallistics">
+              ${BALLISTICS.map((b) => `<option value="${b.value}"${b.value === 0.72 ? ' selected' : ''}>${b.label}</option>`).join('')}
+            </select>
+          </label>
+          <label class="toggle"><input type="checkbox" id="eqHold"> Peak hold</label>
+        </div>
         <div class="eq-transport">
           <button class="play-btn" type="button" data-eq="play">Play</button>
           <div class="eq-ab" role="group" aria-label="What you are hearing">
@@ -111,6 +168,7 @@ export class EQPlugin {
     this.el.querySelector('#eqSource').value = this.source;
 
     this.buildBandButtons();
+    this.buildShape();
     this.buildControls();
     this.wire();
   }
@@ -124,35 +182,99 @@ export class EQPlugin {
       </button>`).join('');
   }
 
+  /**
+   * What kind of band this is, and how steep it is if it is a cut.
+   *
+   * A strip whose six bands are fixed at one type each is a tone control. Any
+   * band being any type is a parametric EQ, which is what the display already
+   * draws and what the scoring already reads - the curve does not care how
+   * you arrived at it.
+   */
+  buildShape() {
+    const band = this.bands[this.selected];
+    const cut = Boolean(BAND_TYPES[band.type].resonance);
+
+    this.el.querySelector('#eqShape').innerHTML = `
+      <span class="panel-name">Type</span>
+      <div class="pick-row" role="group" aria-label="Band type">
+        ${Object.entries(BAND_TYPES).map(([id, type]) => `
+          <button class="pick-btn" type="button" data-type="${id}"
+                  aria-pressed="${id === band.type}" title="${type.label}">${type.short}</button>`).join('')}
+      </div>
+      <span class="panel-name" ${cut ? '' : 'hidden'}>Slope</span>
+      <div class="pick-row" role="group" aria-label="Slope" ${cut ? '' : 'hidden'}>
+        ${SLOPES.map((slope) => `
+          <button class="pick-btn" type="button" data-slope="${slope}"
+                  aria-pressed="${slope === (band.slope ?? 12)}">${slope}</button>`).join('')}
+      </div>
+      <span class="eq-hint">arrows nudge · shift for fine · [ ] for Q</span>`;
+  }
+
   buildControls() {
     const band = this.bands[this.selected];
     const type = BAND_TYPES[band.type];
 
+    // The readouts are fields, not labels. A slider is how you find a
+    // frequency and a terrible way to state one: somebody who knows they want
+    // 3.15k should be able to say so, and get 3.15k rather than whatever
+    // 3.15k is to the nearest pixel.
     this.el.querySelector('#eqControls').innerHTML = `
       <div class="knob">
         <label class="knob-name" for="eqFreq">Frequency</label>
-        <output class="knob-value" id="eqFreqValue">${shortHz(band.frequency)} Hz</output>
+        <input class="knob-value" id="eqFreqValue" data-entry="frequency" type="text"
+               inputmode="decimal" spellcheck="false" value="${exactHz(band.frequency)} Hz"
+               aria-label="Frequency, in hertz">
         <input class="knob-dial" type="range" id="eqFreq" min="${Math.log2(LOW)}" max="${Math.log2(HIGH)}"
                step="0.01" value="${Math.log2(band.frequency)}" aria-label="Frequency">
       </div>
       <div class="knob" ${type.gain ? '' : 'hidden'}>
         <label class="knob-name" for="eqGain">Gain</label>
-        <output class="knob-value" id="eqGainValue">${band.gain.toFixed(1)} dB</output>
+        <input class="knob-value" id="eqGainValue" data-entry="gain" type="text"
+               inputmode="decimal" spellcheck="false" value="${band.gain.toFixed(1)} dB"
+               aria-label="Gain, in decibels">
         <input class="knob-dial" type="range" id="eqGain" min="-${RANGE}" max="${RANGE}" step="0.1"
                value="${band.gain}" aria-label="Gain">
       </div>
       <div class="knob" ${type.q ? '' : 'hidden'}>
         <label class="knob-name" for="eqQ">Q</label>
-        <output class="knob-value" id="eqQValue">${band.q.toFixed(2)}</output>
+        <input class="knob-value" id="eqQValue" data-entry="q" type="text"
+               inputmode="decimal" spellcheck="false" value="${band.q.toFixed(2)}" aria-label="Q">
         <input class="knob-dial" type="range" id="eqQ" min="${Math.log2(0.4)}" max="${Math.log2(12)}"
                step="0.01" value="${Math.log2(Math.max(0.4, band.q))}" aria-label="Q">
       </div>
       <div class="knob" ${type.resonance ? '' : 'hidden'}>
         <label class="knob-name" for="eqRes">Resonance</label>
-        <output class="knob-value" id="eqResValue">${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB</output>
+        <input class="knob-value" id="eqResValue" data-entry="resonance" type="text"
+               inputmode="decimal" spellcheck="false"
+               value="${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB" aria-label="Resonance, in decibels">
         <input class="knob-dial" type="range" id="eqRes" min="-${RANGE}" max="${MOST_RESONANCE}" step="0.1"
                value="${band.q}" aria-label="Resonance">
       </div>`;
+  }
+
+  /**
+   * A number out of something a person typed.
+   *
+   * "3.15k", "3150", "3.15 kHz" and "3k15" are all the same frequency to an
+   * engineer, so they are all the same frequency here. Anything that is not a
+   * number at all leaves the control where it was.
+   */
+  static readEntry(text, kind) {
+    const cleaned = String(text).trim().toLowerCase().replace(/\s|hz/g, '');
+
+    if (kind === 'frequency') {
+      // 3k15 - the way it is written on a console, with the k where the point
+      // would go.
+      const split = /^(\d+)k(\d+)$/.exec(cleaned);
+      if (split) return Number(`${split[1]}.${split[2]}`) * 1000;
+
+      const value = parseFloat(cleaned);
+      if (!Number.isFinite(value)) return null;
+      return /k/.test(cleaned) ? value * 1000 : value;
+    }
+
+    const value = parseFloat(cleaned.replace('db', ''));
+    return Number.isFinite(value) ? value : null;
   }
 
   /* ---------- working it ---------- */
@@ -183,6 +305,46 @@ export class EQPlugin {
       this.changed({ keepControls: true });
     });
 
+    // Typing a number in, and moving one with the keyboard.
+    this.el.querySelector('#eqControls').addEventListener('change', (e) => {
+      const entry = e.target.closest('[data-entry]');
+      if (entry && this.interactive) this.enter(entry);
+    });
+    this.el.querySelector('#eqControls').addEventListener('keydown', (e) => {
+      const entry = e.target.closest('[data-entry]');
+      if (entry && e.key === 'Enter') { e.preventDefault(); entry.blur(); }
+    });
+
+    // What kind of band this is, and how steep it is.
+    this.el.querySelector('#eqShape').addEventListener('click', (e) => {
+      if (!this.interactive) return;
+      const band = this.bands[this.selected];
+
+      const type = e.target.closest('[data-type]');
+      if (type) {
+        const wanted = type.dataset.type;
+        if (wanted !== band.type) {
+          // Q means three different things across these five, so it is reset
+          // to whatever it means here rather than carried over as a number
+          // that happened to be in the field. A peak at Q 1.4 becoming a
+          // high-pass with 1.4 dB of resonance is a ring, not a cut.
+          band.q = RESTING_Q[wanted];
+          band.type = wanted;
+          band.on = true;
+        }
+        this.changed();
+        return;
+      }
+
+      const slope = e.target.closest('[data-slope]');
+      if (slope) {
+        band.slope = Number(slope.dataset.slope);
+        band.on = true;
+        this.changed();
+      }
+    });
+
+    this.canvas.addEventListener('keydown', (e) => this.nudge(e));
     this.canvas.addEventListener('pointerdown', (e) => this.grab(e));
     this.canvas.addEventListener('pointermove', (e) => this.drag(e));
     this.canvas.addEventListener('pointerup', (e) => this.drop(e));
@@ -212,6 +374,22 @@ export class EQPlugin {
     this.el.querySelector('#eqSource').addEventListener('change', (e) => {
       this.source = e.target.value;
       if (this.player.playing) this.player.play(this.source);
+    });
+
+    this.el.querySelector('#eqTilt').addEventListener('change', (e) => {
+      this.tilt = Number(e.target.value);
+      this.held = null;
+      this.draw();
+    });
+
+    this.el.querySelector('#eqBallistics').addEventListener('change', (e) => {
+      this.player.setBallistics(Number(e.target.value));
+    });
+
+    this.el.querySelector('#eqHold').addEventListener('change', (e) => {
+      this.holding = e.target.checked;
+      this.held = null;
+      this.draw();
     });
 
     this.el.querySelector('#eqFile').addEventListener('change', async (e) => {
@@ -258,7 +436,8 @@ export class EQPlugin {
   nodeAt(x, y) {
     const { width, height } = this.size();
     return this.bands.findIndex((band) => {
-      const bandX = toX(band.frequency, width);
+      // Where the disc was drawn, so that what looks grabbable is grabbable.
+      const bandX = Math.max(NODE_EDGE, Math.min(width - NODE_EDGE, toX(band.frequency, width)));
       const bandY = toY(this.curveAt(band.frequency), height);
       return Math.hypot(bandX - x, bandY - y) < 22;
     });
@@ -348,6 +527,7 @@ export class EQPlugin {
     // moves the ear rather than dropping out of solo.
     if (this.player.soloing) this.player.setSolo(this.bands[this.selected]);
     this.buildBandButtons();
+    this.buildShape();
     if (!keepControls) this.buildControls();
     else this.syncControls();
     this.draw();
@@ -358,12 +538,73 @@ export class EQPlugin {
     const band = this.bands[this.selected];
     const set = (id, value) => {
       const node = this.el.querySelector(id);
-      if (node) node.textContent = value;
+      // Never under the hands of somebody typing into it.
+      if (node && document.activeElement !== node) node.value = value;
     };
-    set('#eqFreqValue', `${shortHz(band.frequency)} Hz`);
+    set('#eqFreqValue', `${exactHz(band.frequency)} Hz`);
     set('#eqGainValue', `${band.gain.toFixed(1)} dB`);
     set('#eqQValue', band.q.toFixed(2));
     set('#eqResValue', `${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB`);
+  }
+
+  /**
+   * Moves the selected band by the keyboard.
+   *
+   * Left and right are a semitone of frequency, up and down are half a
+   * decibel, and shift makes all four of them fine. It is the difference
+   * between a plugin you can set and a plugin you can only aim at: a pixel of
+   * a logarithmic axis is a different number of hertz at either end of it,
+   * and the last decibel of a match is not a pixel wide.
+   */
+  nudge(e) {
+    if (!this.interactive) return;
+
+    const band = this.bands[this.selected];
+    const type = BAND_TYPES[band.type];
+    const fine = e.shiftKey;
+    const hold = (value, low, high) => Math.max(low, Math.min(high, value));
+    let took = true;
+
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const octaves = (e.key === 'ArrowRight' ? 1 : -1) * (fine ? 1 / 48 : 1 / 12);
+      band.frequency = hold(band.frequency * 2 ** octaves, LOW, HIGH);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const by = (e.key === 'ArrowUp' ? 1 : -1) * (fine ? 0.1 : 0.5);
+      if (type.gain) band.gain = hold(band.gain + by, -RANGE, RANGE);
+      else band.q = hold(band.q + by, -RANGE, MOST_RESONANCE);
+      band.on = true;
+    } else if ((e.key === '[' || e.key === ']') && type.q) {
+      const by = fine ? 1.02 : 1.12;
+      band.q = hold(e.key === ']' ? band.q * by : band.q / by, 0.4, 12);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      band.on = !band.on;
+    } else if (/^[1-6]$/.test(e.key)) {
+      this.selected = Number(e.key) - 1;
+    } else {
+      took = false;
+    }
+
+    if (!took) return;
+    e.preventDefault();
+    this.changed();
+  }
+
+  /** Types a number into a control, in whatever form it was written. */
+  enter(input) {
+    const band = this.bands[this.selected];
+    const value = EQPlugin.readEntry(input.value, input.dataset.entry);
+
+    if (value !== null) {
+      const hold = (v, low, high) => Math.max(low, Math.min(high, v));
+      if (input.dataset.entry === 'frequency') band.frequency = hold(value, LOW, HIGH);
+      if (input.dataset.entry === 'gain') { band.gain = hold(value, -RANGE, RANGE); band.on = true; }
+      if (input.dataset.entry === 'q') band.q = hold(value, 0.4, 12);
+      if (input.dataset.entry === 'resonance') { band.q = hold(value, -RANGE, MOST_RESONANCE); band.on = true; }
+    }
+
+    // Rebuilt either way: a number that could not be read is replaced by the
+    // one the band is actually on, rather than left sitting there looking set.
+    this.changed();
   }
 
   async toggle() {
@@ -482,16 +723,25 @@ export class EQPlugin {
     if (!bins) return;
 
     const rate = this.engine.ctx.sampleRate;
+    const columns = Math.floor(width / 2) + 2;
+    if (!this.held || this.held.length !== columns) this.held = new Float32Array(columns).fill(-140);
+
+    // -100 dB at the floor of the display, -20 at the top of it.
+    const toLevel = (db) => Math.max(0, Math.min(1, (db + 100) / 80));
+
     c.beginPath();
     c.moveTo(0, height);
 
-    for (let x = 0; x <= width; x += 2) {
+    for (let i = 0, x = 0; x <= width; x += 2, i += 1) {
       const hz = toHz(x, width);
       const bin = Math.round((hz / (rate / 2)) * bins.length);
-      const db = bins[Math.min(bins.length - 1, bin)];
-      // -100 dB at the floor of the display, -20 at the top of it.
-      const level = Math.max(0, Math.min(1, (db + 100) / 80));
-      c.lineTo(x, height - level * height * 0.92);
+      // Tilted, so a balanced mix reads level instead of sloping away to the
+      // right. It changes the picture and nothing else: the curve, the bands
+      // and the marking are all untouched by it.
+      const db = bins[Math.min(bins.length - 1, bin)] + this.tilt * Math.log2(hz / TILT_PIVOT);
+
+      if (this.holding) this.held[i] = Math.max(db, this.held[i] - HOLD_FALL);
+      c.lineTo(x, height - toLevel(db) * height * 0.92);
     }
 
     c.lineTo(width, height);
@@ -499,6 +749,21 @@ export class EQPlugin {
     c.fillStyle = ink.blush;
     c.globalAlpha = 0.22;
     c.fill();
+    c.globalAlpha = 1;
+
+    if (!this.holding) return;
+
+    // Where it has been, which is what you are listening for when a resonance
+    // only shows itself on one note in the bar.
+    c.beginPath();
+    for (let i = 0, x = 0; x <= width; x += 2, i += 1) {
+      const y = height - toLevel(this.held[i]) * height * 0.92;
+      if (x === 0) c.moveTo(x, y); else c.lineTo(x, y);
+    }
+    c.strokeStyle = ink.gold;
+    c.lineWidth = 1;
+    c.globalAlpha = 0.75;
+    c.stroke();
     c.globalAlpha = 1;
   }
 
@@ -573,7 +838,13 @@ export class EQPlugin {
   drawNodes(c, width, height, ink) {
     this.bands.forEach((band, i) => {
       const type = BAND_TYPES[band.type];
-      const x = toX(band.frequency, width);
+      // Held inside the display. A low-pass parked at 18k sits a handle's
+      // width from the wall, so half of it hung off the edge - and that is
+      // where the strip starts, so it was the first thing anybody saw. The
+      // curve is still drawn where it belongs and the handle is still grabbed
+      // where it belongs; only the disc moves, by a few pixels, at the two
+      // ends of the range where the curve is flat anyway.
+      const x = Math.max(NODE_EDGE, Math.min(width - NODE_EDGE, toX(band.frequency, width)));
       const y = toY(this.curveAt(band.frequency), height);
       const chosen = i === this.selected;
 
@@ -610,6 +881,7 @@ export class EQPlugin {
     const band = this.bands[this.selected];
     const type = BAND_TYPES[band.type];
     const parts = [type.label, `${shortHz(band.frequency)} Hz`];
+    if (type.resonance) parts.push(`${band.slope ?? 12} dB/oct`);
     if (type.gain) parts.push(`${band.gain > 0 ? '+' : ''}${band.gain.toFixed(1)} dB`);
     if (type.q) parts.push(`Q ${band.q.toFixed(2)}`);
     if (type.resonance) parts.push(`res ${band.q > 0 ? '+' : ''}${band.q.toFixed(1)} dB`);
