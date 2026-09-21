@@ -224,6 +224,38 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .link-btn:hover { color: var(--blush-deep); border-color: var(--blush-deep); }
 .link-btn[aria-pressed="true"] { color: var(--blush-deep); border-bottom-width: 2px; border-color: var(--blush-deep); }
 
+/* --- what you are practising --------------------------------------------- */
+/* Seven games, named on the page. They were behind a dropdown, which is a fine
+   way to pick a voicing and a poor way to show somebody that the other six
+   exist at all. A row of states you can be in, so: pills, wrapping. */
+.modes {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-block: 4px 2px;
+}
+.mode-pill {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  padding: 7px 15px;
+  font-family: var(--sans);
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 500;
+  color: var(--text-soft);
+  white-space: nowrap;
+}
+.mode-pill:hover { border-color: var(--blush); color: var(--blush-deep); }
+.mode-pill[aria-checked="true"] {
+  background: var(--charcoal);
+  border-color: var(--charcoal);
+  color: var(--cream);
+}
+
 /* --- the setup row ------------------------------------------------------- */
 /* A second row of the top bar rather than a zone of its own: `flex-basis: 100%`
    in a wrapping row is all "always on its own line" needs. */

@@ -35,6 +35,13 @@ npm run artifact    # bundles the whole app into dist/harmonle.html, one file
 it can be published or opened straight off disk. Nothing is minified and nothing
 is rewritten beyond the module keywords, so the bundle reads as the source does.
 
+Flattening seven modules into one scope has one hazard, and it shipped once: two
+modules had each grown a `write`, which is nothing in separate scopes and a
+SyntaxError in one — and a script that does not parse leaves a page whose every
+control comes up empty. The bundler now refuses to emit a bundle whose modules
+would collide, names both files when they do, and parses its own output before
+writing it; `tests/bundle.test.js` runs the whole thing on every `npm test`.
+
 ## How a round works
 
 1. Press the clue. Most modes offer something to compare against — EQ plays the

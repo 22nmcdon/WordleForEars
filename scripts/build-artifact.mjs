@@ -7,8 +7,11 @@
 // top to bottom.
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -41,6 +44,44 @@ function flatten(source, name) {
     .trim();
 }
 
+/**
+ * Every name a module declares at its top level.
+ *
+ * Flattening is only safe while no two modules declare the same one, and the
+ * day that stopped being true the bundle did not fail loudly - it failed as a
+ * page whose every control came up empty, because one SyntaxError takes the
+ * whole script with it. `stats.js` had a `write` and `main.js` grew one.
+ */
+function topLevelNames(source) {
+  const names = [];
+  const declaration = /^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/gm;
+  for (const [, name] of source.matchAll(declaration)) names.push(name);
+  return names;
+}
+
+/** Refuses to emit a bundle whose modules would collide once flattened. */
+function checkNames(modules) {
+  const seen = new Map();
+  const clashes = [];
+
+  for (const { path, code } of modules) {
+    for (const name of topLevelNames(code)) {
+      if (seen.has(name) && seen.get(name) !== path) {
+        clashes.push(`${name} (${seen.get(name)} and ${path})`);
+      } else {
+        seen.set(name, path);
+      }
+    }
+  }
+
+  if (clashes.length) {
+    throw new Error(
+      `these names are declared in more than one module, and one scope cannot hold both:\n  `
+      + clashes.join('\n  ')
+      + '\nRename one of each pair.');
+  }
+}
+
 const page = await readFile(join(root, 'index.html'), 'utf8');
 const styles = await readFile(join(root, 'styles.css'), 'utf8');
 
@@ -56,12 +97,16 @@ const fonts = /<link id="webfonts"[\s\S]*?>/.exec(page)[0];
 // the gallery card already prints underneath.
 const title = 'Harmonle';
 
-const code = [];
+const modules = [];
 for (const path of MODULES) {
   const source = await readFile(join(root, 'src', path), 'utf8');
   const name = path.split('/').pop().replace(/\.js$/, '');
-  code.push(`/* ---- src/${path} ---- */\n${flatten(source, name)}`);
+  modules.push({ path, code: flatten(source, name) });
 }
+
+checkNames(modules);
+
+const code = modules.map(({ path, code: source }) => `/* ---- src/${path} ---- */\n${source}`);
 
 // One scope, so the bundle cannot leak names into the host page.
 const script = `<script type="module">\n(function () {\n${code.join('\n\n')}\n}());\n</script>`;
@@ -79,5 +124,15 @@ ${body}
 ${script}
 `;
 
+// And then read back what was written. A bundle is only worth having if it
+// runs, and the way it fails is silent: the page renders its markup, the script
+// dies on the first line, and every control that JavaScript fills comes up
+// empty. Cheaper to find here than in a published artifact.
+const emitted = bundle.slice(bundle.indexOf('<script type="module">') + '<script type="module">'.length,
+                             bundle.lastIndexOf('</script>'));
+const checkFile = join(tmpdir(), 'harmonle-bundle-check.mjs');
+await writeFile(checkFile, emitted);
+await promisify(execFile)(process.execPath, ['--check', checkFile]);
+
 await writeFile(join(root, 'dist', 'harmonle.html'), bundle);
-console.log(`dist/harmonle.html — ${(bundle.length / 1024).toFixed(1)} KB`);
+console.log(`dist/harmonle.html — ${(bundle.length / 1024).toFixed(1)} KB, parses clean`);

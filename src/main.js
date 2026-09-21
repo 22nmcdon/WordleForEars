@@ -11,7 +11,7 @@ import { engraveSymbol, engraveNote } from './engrave.js';
 const $ = (sel) => document.querySelector(sel);
 
 /** Chord symbols are engraved; everything else only needs its accidentals. */
-const write = (target, text) =>
+const writeSymbol = (target, text) =>
   (mode().handLettered ? engraveSymbol(target, text) : engraveNote(target, text));
 
 /* The webfonts, promoted only when this page is being served. `rel` is set with
@@ -45,11 +45,18 @@ const settingOf = (id) => {
 
 /* ---------- setup row ---------- */
 
+/** The seven, on the page rather than behind a click. */
 function fillModes() {
-  $('#mode').innerHTML = MODE_IDS
-    .map((id) => `<option value="${id}">${MODES[id].label} — ${MODES[id].blurb}</option>`)
+  $('#modes').innerHTML = MODE_IDS
+    .map((id) => `<button class="mode-pill" type="button" role="radio" data-train="${id}"`
+      + ` aria-checked="${id === ui.mode}" title="${MODES[id].blurb}">${MODES[id].label}</button>`)
     .join('');
-  $('#mode').value = ui.mode;
+}
+
+function syncModes() {
+  for (const pill of document.querySelectorAll('[data-train]')) {
+    pill.setAttribute('aria-checked', pill.dataset.train === ui.mode ? 'true' : 'false');
+  }
 }
 
 function fillTiers() {
@@ -91,7 +98,7 @@ function chip(slotId, option) {
   // interval, a clave - is set in the serif, on the line, with its accidentals
   // still borrowed from the serif.
   symbol.className = mode().handLettered ? 'symbol hand' : 'symbol';
-  write(symbol, option.symbol);
+  writeSymbol(symbol, option.symbol);
   button.appendChild(symbol);
 
   if (option.name) {
@@ -264,7 +271,7 @@ function finish(game, { replay = true } = {}) {
 
   const symbol = document.createElement('span');
   symbol.className = mode().handLettered ? 'symbol hand' : 'symbol';
-  write(symbol, answer.symbol);
+  writeSymbol(symbol, answer.symbol);
   played.appendChild(symbol);
   played.appendChild(document.createTextNode(answer.name ? ` — ${answer.name}.` : '.'));
 
@@ -354,7 +361,7 @@ function drawCell(cell) {
 
   const value = document.createElement('span');
   value.className = cell.symbol && mode().handLettered ? 'value hand' : 'value';
-  write(value, cell.text);
+  writeSymbol(value, cell.text);
   node.appendChild(value);
   return node;
 }
@@ -460,11 +467,30 @@ function wire() {
     });
   }
 
-  $('#mode').addEventListener('change', (e) => {
-    ui.mode = e.target.value;
+  $('#modes').addEventListener('click', (e) => {
+    const pill = e.target.closest('[data-train]');
+    if (!pill || pill.dataset.train === ui.mode) return;
+
+    ui.mode = pill.dataset.train;
+    syncModes();
     fillTiers();
     fillSetting();
     startGame();
+  });
+
+  // Arrow keys walk the strip, the way a radio group is expected to.
+  $('#modes').addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    const next = MODE_IDS[(MODE_IDS.indexOf(ui.mode) + step + MODE_IDS.length) % MODE_IDS.length];
+    ui.mode = next;
+    syncModes();
+    fillTiers();
+    fillSetting();
+    startGame();
+    document.querySelector(`[data-train="${next}"]`).focus();
   });
   $('#tier').addEventListener('change', (e) => { ui.tier = e.target.value; startGame(); });
   $('#setting').addEventListener('change', (e) => {
