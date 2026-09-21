@@ -100,25 +100,25 @@ export class CompPlugin {
 
     this.el.innerHTML = `
       <div class="comp">
-        <div class="comp-head">
-          <span class="comp-name">Compressor</span>
-          <span class="comp-trim" id="compTrim"></span>
-          <span class="comp-read" id="compRead"></span>
+        <div class="plugin-head">
+          <span class="plugin-name">Compressor</span>
+          <span class="plugin-trim" id="compTrim"></span>
+          <span class="plugin-read" id="compRead"></span>
         </div>
 
         <div class="comp-display">
-          <div class="comp-panel comp-panel-curve">
+          <div class="plugin-panel comp-panel-curve">
             <canvas id="compCurve"></canvas>
           </div>
-          <div class="comp-panel comp-panel-trace">
+          <div class="plugin-panel comp-panel-trace">
             <canvas id="compTrace"></canvas>
           </div>
-          <div class="comp-panel comp-panel-meters">
+          <div class="plugin-panel comp-panel-meters">
             <canvas id="compMeters"></canvas>
           </div>
         </div>
 
-        <div class="comp-controls" id="compKnobs"></div>
+        <div class="plugin-controls" id="compKnobs"></div>
 
         <div class="comp-detector">
           <div class="comp-detector-head">
@@ -132,7 +132,7 @@ export class CompPlugin {
             </label>
             <button class="ab-btn listen-btn" type="button" data-comp="listen" aria-pressed="false">Listen to the key</button>
           </div>
-          <div class="comp-controls" id="compKeyKnobs"></div>
+          <div class="plugin-controls" id="compKeyKnobs"></div>
         </div>
 
         <div class="eq-transport comp-transport">

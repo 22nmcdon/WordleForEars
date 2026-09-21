@@ -19,9 +19,7 @@ export function answerAsGuess(puzzle) {
 
   if (spec.surface) {
     if (!puzzle.answer) return null;
-    // A settings object is a guess; anything else is a description of a
-    // result, which the surface cannot be set to.
-    if (puzzle.mode === 'compression' && !('threshold' in puzzle.answer)) return null;
+    if (RESULT_MARKED[puzzle.mode]?.includes(puzzle.settings?.exercise)) return null;
     return puzzle.answer;
   }
 
@@ -32,6 +30,22 @@ export function answerAsGuess(puzzle) {
 }
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+
+/**
+ * The exercises that are marked on what came out rather than against a stored
+ * setting, and so keep no answer that could be played back.
+ *
+ * Levelling a loop is done when the loop sits still and there are many
+ * compressors that will do it; ducking and fitting a room to a tempo are
+ * described by what they achieve. Named here rather than guessed at, because
+ * the guess would have to be something like "the answer does not look like a
+ * setting", and a reverb asked to answer on a sixteenth has a pre-delay in
+ * its answer and looks exactly like one.
+ */
+const RESULT_MARKED = {
+  compression: ['fix', 'duck'],
+  reverb: ['tempo'],
+};
 
 /**
  * The nth guess that is not the answer.
@@ -53,6 +67,13 @@ export function wrongGuess(puzzle, nth = 0) {
       // Far lower and far harder than any answer this mode makes, and a
       // different threshold each time so no two attempts are the same guess.
       return { threshold: -55 + nth, ratio: 18, attack: 1, release: 30, sidechain: false };
+    }
+
+    if (puzzle.mode === 'reverb') {
+      // Longer than any room this mode asks for, answering instantly, and
+      // soaked - which is wrong for matching a space and wrong for fitting a
+      // tempo, since a seven second tail is never gone by the next beat.
+      return { decay: 7 + nth * 0.2, preDelay: 4, mix: 0.9, damping: 1, early: 0 };
     }
 
     // Nothing dialled at all, then a band in the wrong place.

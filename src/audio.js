@@ -18,6 +18,18 @@ export function midiToFreq(midi) {
 export const dbToGain = (db) => 10 ** (db / 20);
 
 /**
+ * The shape of every loop this app plays: two bars of four, at 96.
+ *
+ * Named because things outside the engine need them. A reverb asked to clear
+ * by the next beat has to know how long a beat is, and working that out
+ * backwards from the loop's length would be working out an answer from an
+ * answer.
+ */
+export const LOOP_BPM = 96;
+export const LOOP_BARS = 2;
+export const LOOP_BEAT = 60 / LOOP_BPM;
+
+/**
  * The kit, as recipes: where the noise is filtered and how long it rings.
  *
  * `level` is set so that one hit at level 1 comes out where a record would
@@ -310,7 +322,7 @@ export class Engine {
    * a decaying pattern has a chord still ringing when the splice comes round,
    * and chopping it there is an audible click on every pass.
    */
-  async renderLoop(kind, { bars = 2, bpm = 96, uneven = 0 } = {}) {
+  async renderLoop(kind, { bars = LOOP_BARS, bpm = LOOP_BPM, uneven = 0 } = {}) {
     this.ensure();
     // `uneven` is part of what the loop is, not a way of playing it - a bed
     // whose hits are all over the place is a different recording - so it is

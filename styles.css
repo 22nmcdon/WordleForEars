@@ -719,76 +719,84 @@ input.knob-value:focus {
   .eq-hint { display: none; }
 }
 
-/* --- the compressor -------------------------------------------------------- */
-/* Three readings of the same thing, side by side, because a compressor is the
-   one processor where the picture, the bar and the moment genuinely differ:
-   the curve is what it would do, the trace is what it did to this loop, and
-   the meter is what it is doing now. Dark, like the EQ, and for the same
-   reason - this is how a plugin looks, and inverting it for the sake of the
-   page would cost more in legibility than it gained in manners. */
-.comp { display: flex; flex-direction: column; gap: 12px; }
+/* --- plugins ---------------------------------------------------------------- */
+/* The furniture the compressor and the reverb share. Written once: three
+   copies of the same rules is three rules to keep in step, and the day one of
+   them drifts is the day a panel stops matching the one beside it.
 
-.comp-head {
+   The displays are dark and everything around them is not. That is how a
+   plugin looks, and inverting it for the sake of the page would cost more in
+   legibility than it gained in manners. */
+.comp, .verb { display: flex; flex-direction: column; gap: 12px; }
+
+.plugin-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px 16px;
   flex-wrap: wrap;
 }
-.comp-name {
+.plugin-name {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.2em;
   font-weight: 500;
   color: var(--blush-deep);
 }
-/* Reads the same as the EQ's, and deliberately does not restate it: a second
-   rule for the same thing is a second rule to keep in step. */
-.comp-trim {
+/* What auto gain is doing. Reads the same as the EQ's, and deliberately does
+   not restate it. */
+.plugin-trim {
   font-size: 11px;
   letter-spacing: 0.08em;
   color: var(--text-soft);
   font-variant-numeric: tabular-nums;
 }
-.comp-read {
+.plugin-read {
   font-family: var(--serif);
   font-size: 14px;
   color: var(--charcoal);
   font-variant-numeric: tabular-nums;
 }
 
-/* The curve is squarish because it is a graph of one thing against another
-   and a stretched one lies about the slope; the trace takes what is left,
-   because time is what there is a lot of. */
-.comp-display {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.8fr) 2fr 58px;
-  gap: 8px;
-  height: clamp(190px, 32vh, 290px);
-}
-.comp-panel {
+.plugin-panel {
   position: relative;
   background: var(--charcoal);
   border: 1px solid var(--charcoal);
   border-radius: 1px;
   overflow: hidden;
 }
-.comp-panel canvas {
+.plugin-panel canvas {
   width: 100%;
   height: 100%;
   display: block;
   touch-action: none;
 }
 
-.comp-controls {
+.plugin-controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px 20px;
 }
 /* Auto gain is holding the makeup knob, and says so by standing back from it
    rather than by disappearing - the number on it is still worth reading. */
-.comp-controls .knob.is-auto { opacity: 0.45; }
-.comp-controls .knob.is-auto .knob-dial { pointer-events: none; }
+.plugin-controls .knob.is-auto { opacity: 0.45; }
+.plugin-controls .knob.is-auto .knob-dial { pointer-events: none; }
+
+/* Once the round is over the plugin stops moving, and the answer is on screen. */
+.is-locked .plugin-controls,
+.is-locked .comp-detector { opacity: 0.5; pointer-events: none; }
+
+/* --- the compressor -------------------------------------------------------- */
+/* Three readings of the same thing, side by side, because a compressor is the
+   one processor where the picture, the bar and the moment genuinely differ:
+   the curve is what it would do, the trace is what it did to this loop, and
+   the meter is what it is doing now. */
+.comp-display {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) 2fr 58px;
+  gap: 8px;
+  height: clamp(190px, 32vh, 290px);
+}
 
 /* The detector: its own panel, because what a compressor is listening to is a
    separate question from what it does about it, and the two get confused. */
@@ -805,6 +813,27 @@ input.knob-value:focus {
   align-items: center;
   gap: 10px 14px;
 }
+.comp-detector .listen-btn {
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  padding: 7px 15px;
+  color: var(--text-soft);
+}
+.comp-detector .listen-btn:hover { border-color: var(--blush); color: var(--blush-deep); }
+.comp-detector .listen-btn.is-on { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
+
+/* --- the reverb ------------------------------------------------------------ */
+/* Two pictures of one room, because they answer different questions. The
+   impulse is what the room is - the gap before it answers, the walls arriving
+   one at a time, the wash closing over them. The decay is what it does, band
+   by band, and it is also exactly what a guess is marked against. */
+.verb-display {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 1.45fr;
+  gap: 8px;
+  height: clamp(190px, 32vh, 290px);
+}
+
 /* Names a panel within a plugin - the compressor's detector, the EQ's
    analyser. Shared, because a second rule for the same thing is a second rule
    to keep in step. */
@@ -815,14 +844,6 @@ input.knob-value:focus {
   font-weight: 500;
   color: var(--text-soft);
 }
-.comp-detector .listen-btn {
-  border: 1px solid var(--line);
-  border-radius: 30px;
-  padding: 7px 15px;
-  color: var(--text-soft);
-}
-.comp-detector .listen-btn:hover { border-color: var(--blush); color: var(--blush-deep); }
-.comp-detector .listen-btn.is-on { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
 
 .toggle {
   display: flex;
@@ -837,11 +858,8 @@ input.knob-value:focus {
 }
 .toggle input { accent-color: var(--blush-deep); width: 15px; height: 15px; }
 
-.comp.is-locked .comp-controls,
-.comp.is-locked .comp-detector { opacity: 0.5; pointer-events: none; }
-
 @media (max-width: 760px) {
-  /* The curve and the trace stack; the meters stay beside them, because a
+  /* The panels stack; the compressor's meters stay beside them, because a
      meter lying on its side is not a meter. */
   .comp-display {
     grid-template-columns: 1fr 46px;
@@ -851,7 +869,13 @@ input.knob-value:focus {
   .comp-panel-curve { grid-area: curve; }
   .comp-panel-trace { grid-area: trace; }
   .comp-panel-meters { grid-area: meters; }
-  .comp-controls { grid-template-columns: 1fr 1fr; }
+
+  .verb-display {
+    grid-template-columns: 1fr;
+    height: clamp(260px, 48vh, 360px);
+  }
+
+  .plugin-controls { grid-template-columns: 1fr 1fr; }
 }
 
 /* --- controls you dial ---------------------------------------------------- */
