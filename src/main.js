@@ -560,14 +560,13 @@ function fillHelp() {
   const slots = mode().slots(ui.tier, settings());
   const tier = mode().tiers[ui.tier];
 
-  const entries = mode().surface ? [
-    ['Play the loop, then shape the EQ.',
-     'Drag a band to move it; the wheel over a band is its Q; the buttons under the '
-     + 'display turn one on and off. Yours and the other side swap instantly, so you '
-     + 'can flip while it runs.'],
-    ['You are judged on the curve, not the controls.',
-     'Two different sets of bands that make the same shape are the same answer - what is '
-     + 'compared is what comes out.'],
+  // A mode that brings its own interface explains its own interface: there is
+  // nothing useful the shell can say about a plugin it has never seen.
+  const entries = mode().help ? mode().help.map((entry) => [...entry]) : mode().surface ? [
+    ['Play the loop, then work the plugin.',
+     'Yours and the other side swap instantly, so you can flip while it runs.'],
+    ['You are judged on what comes out, not on the controls.',
+     'Two different ways of arriving at the same result are the same answer.'],
   ] : [
     ['Press ' + clues[0].label.toLowerCase() + ', then name what you heard.',
      clues.length > 1
@@ -584,7 +583,8 @@ function fillHelp() {
   for (const spec of mode().settings ?? []) {
     entries.push([`${spec.label}: ${spec.options.map((o) => o.label).join(', ')}.`,
       spec.id === 'exercise'
-        ? 'Two different exercises, not two views of one - each has its own daily.'
+        ? `${spec.options.length} different exercises, not ${spec.options.length} views of one `
+          + '- each has its own daily.'
         : 'Up in the setup row, and it changes what you are listening to rather than how hard it is.']);
   }
 

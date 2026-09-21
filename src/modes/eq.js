@@ -40,6 +40,16 @@ export default {
       + 'yours sounds like the target — or until the problem in the sample is gone.',
   opening: 'Play the loop, shape the EQ, then lock it in.',
 
+  help: [
+    ['Play the loop, then shape the EQ.',
+     'Drag a band to move it; the wheel over a band is its Q; the buttons under the '
+     + 'display turn one on and off. Yours and the other side swap instantly, so you '
+     + 'can flip while it runs.'],
+    ['You are judged on the curve, not the controls.',
+     'Two different sets of bands that make the same shape are the same answer - what is '
+     + 'compared is what comes out.'],
+  ],
+
   settings: [
     {
       id: 'exercise',

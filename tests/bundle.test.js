@@ -50,3 +50,13 @@ test('no two modules declare the same top-level name', async () => {
     }
   }
 });
+
+test('the bundle says what encoding it is in', async () => {
+  const page = await readFile(join(root, 'dist', 'harmonle.html'), 'utf8');
+
+  // It has to be inside the first kilobyte or the parser has already guessed,
+  // and the page is full of em dashes and middle dots to guess wrong about.
+  const at = page.indexOf('<meta charset="utf-8">');
+  assert.ok(at >= 0, 'the bundle declares no character set');
+  assert.ok(at < 1024, `the declaration is ${at} bytes in, which is too late to count`);
+});

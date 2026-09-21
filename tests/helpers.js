@@ -1,18 +1,35 @@
 import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
 
 /**
- * The answer, as a guess.
+ * The answer, as a guess - or nothing, when the round does not have one.
  *
  * A mode with its own interface hands back whatever that interface builds -
  * for the EQ, a set of bands - so the answer is already in that shape and is
  * its own perfect guess.
+ *
+ * Two of the compressor's exercises are marked on what came out rather than
+ * against a stored setting, so there is no answer to hand back: evening out a
+ * loop is done when the loop sits still, and there are many compressors that
+ * will do it. Those rounds say so by returning null, and the tests that want
+ * a winning guess skip them - with their own tests, further down, for the
+ * thing those exercises actually promise.
  */
-export const answerAsGuess = (puzzle) => (modeOf(puzzle.mode).surface
-  ? puzzle.answer
-  : Object.fromEntries(
-    modeOf(puzzle.mode).slots(puzzle.tier, puzzle.settings)
+export function answerAsGuess(puzzle) {
+  const spec = modeOf(puzzle.mode);
+
+  if (spec.surface) {
+    if (!puzzle.answer) return null;
+    // A settings object is a guess; anything else is a description of a
+    // result, which the surface cannot be set to.
+    if (puzzle.mode === 'compression' && !('threshold' in puzzle.answer)) return null;
+    return puzzle.answer;
+  }
+
+  return Object.fromEntries(
+    spec.slots(puzzle.tier, puzzle.settings)
       .map((slot) => [slot.id, puzzle.answer[slot.id]]),
-  ));
+  );
+}
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 
@@ -29,9 +46,16 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 export function wrongGuess(puzzle, nth = 0) {
   const spec = modeOf(puzzle.mode);
 
-  // Nothing dialled at all, then a band in the wrong place - both a long way
-  // from any target this mode sets.
+  // A surface hands back whatever it builds, so a wrong guess has to be in
+  // that shape. Both of these are a long way from any target their mode sets.
   if (spec.surface) {
+    if (puzzle.mode === 'compression') {
+      // Far lower and far harder than any answer this mode makes, and a
+      // different threshold each time so no two attempts are the same guess.
+      return { threshold: -55 + nth, ratio: 18, attack: 1, release: 30, sidechain: false };
+    }
+
+    // Nothing dialled at all, then a band in the wrong place.
     return nth === 0 ? [] : [{
       type: 'peaking', frequency: 60 * (nth + 1), gain: 12, q: 1 + nth, on: true,
     }];

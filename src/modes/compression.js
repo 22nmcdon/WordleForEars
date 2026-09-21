@@ -1,118 +1,245 @@
-import { dialled, logPick, toStep } from './scoring.js';
+import { COMP_DEFAULTS, analyse, runCompressor, meanFrames } from '../comp/dsp.js';
+import { CompPlugin, writeTime, writeRatio } from '../comp/plugin.js';
+import { HIT, NEAR, MISS, logPick, toStep } from './scoring.js';
 
 /**
- * The plan calls this one genuinely difficult even for pros, and it is - so
- * it is built as the tool rather than the quiz: real controls, your settings
- * audible against the target's, and two exercises.
+ * The compressor, as the tool it is.
  *
- * **Match** puts a compressor on the sample and asks you to build the same
- * one. **Fix** hands you a loop whose hits are all over the place and asks you
- * to even them out, which is what a compressor is actually for.
+ * Three exercises, and none of them is a quiz about a number. **Match** puts
+ * a compressor on the loop and asks you to build the same one. **Even it out**
+ * hands you a loop whose hits are all over the place, which is what a
+ * compressor is actually for. **Duck** gives you a bass and a kick and asks
+ * you to get one out of the way of the other, which is what a sidechain is
+ * actually for.
  *
- * Loudness is matched either way - see MAKEUP below for how, and why it
- * matters more here than anywhere else in the app.
+ * All three are marked on what came out, not on where the knobs ended up -
+ * the same decision the EQ mode makes, and for the same reason. Two settings
+ * that do the same thing to the same audio are the same answer, and a game
+ * that said otherwise would be teaching one plugin's layout rather than an
+ * ear. It costs more than comparing numbers: marking a guess means running
+ * the compressor over the loop twice. It is worth it.
  */
-/**
- * What Web Audio's compressor does to the loudness, in decibels, with no trim
- * at all - measured across the grid rather than derived, because the node
- * applies a makeup gain of its own that is in the implementation and not in
- * the arithmetic. Rows are thresholds, columns are ratios; the numbers are the
- * average of the two sources this mode offers.
- *
- * It matters because a clip that arrives louder than the one before it is a
- * level test: the answer would be "the loud one", every time, without
- * listening to a thing. Trimming it back off leaves the shape, which is what
- * is actually being asked about.
- *
- * Derived from an offline render of every cell. Re-measure if the bed changes.
- */
-const MAKEUP = {
-  thresholds: [-40, -32, -24, -16, -8],
-  ratios: [2, 4, 8, 16],
-  db: [
-    [-1.09, -0.93, -0.64, -0.54],
-    [0.20, 0.74, 1.25, 1.48],
-    [1.31, 2.19, 2.71, 2.92],
-    [1.92, 2.92, 3.44, 3.72],
-    [1.18, 2.00, 2.49, 2.79],
-  ],
+
+/** What each exercise is played on, and what it is marked on. */
+const COMP_EXERCISES = {
+  match: { source: 'drums', key: null, other: 'Target' },
+  fix: { source: 'drums', key: null, other: 'Untreated' },
+  duck: { source: 'bass', key: 'kick', other: 'Untreated' },
 };
 
-const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-
-/** Where a value sits in a list: which pair it falls between, and how far. */
-function between(value, list) {
-  const at = clamp(value, list[0], list[list.length - 1]);
-  let i = 0;
-  while (i < list.length - 2 && at > list[i + 1]) i += 1;
-  return { i, mix: (at - list[i]) / (list[i + 1] - list[i]) };
-}
-
-/** The measured makeup at any setting, read off the grid between the points. */
-function makeupFor(threshold, ratio) {
-  const row = between(threshold, MAKEUP.thresholds);
-  // Ratios are heard in ratios, so the grid is walked in octaves of ratio.
-  const column = between(Math.log2(ratio), MAKEUP.ratios.map(Math.log2));
-
-  const across = (r) => MAKEUP.db[r][column.i] * (1 - column.mix) + MAKEUP.db[r][column.i + 1] * column.mix;
-  return across(row.i) * (1 - row.mix) + across(row.i + 1) * row.mix;
-}
-
-const writeRatio = (ratio) => `${ratio.toFixed(ratio < 10 ? 1 : 0)} : 1`;
-const writeThreshold = (db) => `${db.toFixed(0)} dB`;
-const writeMs = (ms) => `${ms < 10 ? ms.toFixed(1) : ms.toFixed(0)} ms`;
+/**
+ * Beats in a loop. `renderLoop` builds two bars of four, and both the
+ * evenness reading and the duck reading slice the loop up by beat - each beat
+ * of the drum bed carries exactly one hit, and the kick bed puts one on every
+ * beat, so a beat is the right unit for both.
+ */
+const BEATS = 8;
 
 /**
- * The two sources do not arrive at the same level - the full mix is some 3 dB
- * hotter than the drums alone - so each is trimmed to the same peak before the
- * compressor sees it. Without that, the threshold that is right for one source
- * is 3 dB wrong for the other, and changing what you are listening to would
- * quietly change the answer.
+ * How close counts, per tier, in decibels.
  *
- * Measured off the bed, going into the chain (which is ahead of the master
- * gain, so these are not the levels that come out of the speakers).
+ * Set from measurement rather than taste. Over a hundred of the targets this
+ * mode actually generates, run against the drum bed: leaving the compressor
+ * alone reads at worst 1.7 dB out and usually six; a threshold two decibels
+ * off reads 0.3 to 1.2; four decibels off reads 0.6 to 2.4; a ratio half as
+ * much again reads under 1.9. So easy forgives a couple of decibels of
+ * threshold, medium does not quite, and hard wants the timing as well - and
+ * doing nothing at all fails every one of them.
  */
-const INTO_THE_CHAIN = { drums: 0.489, mix: 0.699 };
-const WORKING_PEAK = 0.5;
-
-/**
- * Where the loud hits sit once trimmed, in dBFS. The fix exercise's answer is
- * built from it: a threshold at the quiet hits and a ratio that brings the
- * loud ones down to meet them.
- */
-const LOUD_PEAK_DB = Math.round(20 * Math.log10(WORKING_PEAK));
-
-/**
- * What it actually takes to level this loop, found by rendering the grid
- * rather than by arithmetic.
- *
- * On paper a threshold at the quiet hits and a ratio of spread-over-3 should
- * do it. It does not: the detector is looking at peaks while most of a drum
- * hit's energy sits well below its peak, and the knee softens the onset on top
- * of that - so the settings that make the loop measurably even sit about 9 dB
- * lower and a good deal harder than the arithmetic says. A reference answer
- * that was merely plausible would be teaching the wrong lesson, since it is
- * what the player's own dialling is scored against.
- *
- * Measured at 9, 12 and 15 dB of unevenness; the flattest cell of each grid
- * was -24/4, -28/4 and -32/6, which these two lines pass through.
- */
-const THRESHOLD_UNDER = 9;
-const RATIO_FOR = (uneven) => uneven / 2.5;
-
-const KNOB_TOLERANCE = {
-  easy: { threshold: { hit: 6, near: 12 }, ratio: { hit: 1, near: 2 }, attack: { hit: 1.4, near: 2.6 } },
-  medium: { threshold: { hit: 4, near: 9 }, ratio: { hit: 0.7, near: 1.5 }, attack: { hit: 1.2, near: 2.2 } },
-  hard: { threshold: { hit: 3, near: 6 }, ratio: { hit: 0.5, near: 1.1 }, attack: { hit: 1, near: 1.8 } },
+const COMP_CLOSE = {
+  match: { easy: 1.5, medium: 1.0, hard: 0.6 },
+  fix: { easy: 2.8, medium: 1.8, hard: 1.2 },
+  duck: { easy: 2.4, medium: 1.6, hard: 1.1 },
 };
+
+/**
+ * How much reduction is more than the job needs.
+ *
+ * Levelling a loop whose hits are N decibels apart takes about N decibels off
+ * the loud ones. Taking off a great deal more also levels it - everything
+ * squashed flat is level - so evenness on its own would mark the worst answer
+ * full marks. This is the margin past the job that still counts as doing it.
+ *
+ * Twelve, because the reduction is read at its deepest and a fast attack on a
+ * drum hit reads several decibels deeper than the work it is doing to the
+ * body of the sound. Measured on the loop, the settings that level it land
+ * between eighteen and twenty-four decibels at their deepest, and a limiter
+ * set to flatten it reads forty-five.
+ */
+const OVERWORKED = 12;
+
+/* ---------- reading what came out ---------- */
+
+/**
+ * How loud each beat is, in dB.
+ *
+ * Loudness rather than peak, and the distinction is the whole exercise. A
+ * compressor with any attack worth the name does not touch a drum's peak -
+ * the peak is over in a millisecond or two, which is what the attack knob is
+ * for - it works on the body of the hit. Marked on peaks, a loop levelled by
+ * a good engineer read no better than one nobody had touched, and the only
+ * thing that scored was a limiter set to destroy. Marked on loudness, the
+ * reading agrees with the ear.
+ */
+function beatLevels(samples) {
+  const span = Math.floor(samples.length / BEATS);
+  const levels = [];
+
+  for (let beat = 0; beat < BEATS; beat += 1) {
+    let sum = 0;
+    const end = Math.min(samples.length, (beat + 1) * span);
+    for (let i = beat * span; i < end; i += 1) sum += samples[i] * samples[i];
+    levels.push(10 * Math.log10(sum / Math.max(1, end - beat * span) + 1e-12));
+  }
+
+  return levels;
+}
+
+/**
+ * What the sidechain is doing, beat by beat: how far the signal is pushed
+ * down when the key hits, and how long it takes to come back.
+ *
+ * Recovery is measured to within a decibel of where it started rather than
+ * all the way, because the last decibel of an exponential takes forever and
+ * nobody hears it arrive.
+ */
+function duckOf(gr, rate) {
+  const span = Math.floor(gr.length / BEATS);
+  const depths = [];
+  const recoveries = [];
+  let held = 0;   // beats that never came back up before the next one
+
+  for (let beat = 0; beat < BEATS; beat += 1) {
+    const from = beat * span;
+    const to = Math.min(gr.length, from + span);
+
+    let deepest = 0;
+    let at = from;
+    for (let i = from; i < to; i += 1) {
+      if (gr[i] < deepest) { deepest = gr[i]; at = i; }
+    }
+    if (deepest > -0.5) continue;
+
+    depths.push(-deepest);
+    let back = null;
+    for (let i = at; i < to; i += 1) {
+      if (gr[i] > -1) { back = i; break; }
+    }
+    // Still down when the next one lands. Reporting the gap between kicks as
+    // though it had recovered would read as a long release rather than as a
+    // release so long the track never comes back up, which is a different
+    // mistake and wants saying differently.
+    if (back === null) { held += 1; continue; }
+    recoveries.push(((back - at) / rate) * 1000);
+  }
+
+  const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0);
+  return {
+    depth: mean(depths),
+    recovery: mean(recoveries),
+    hits: depths.length,
+    held,
+  };
+}
+
+/**
+ * A stand-in for the loop, for the times the real thing is not to hand.
+ *
+ * The surface renders the material the moment it mounts, so in the app this
+ * is never what marks a guess. It exists so that scoring is a pure function
+ * that a test can call without an audio context, and so that a guess
+ * submitted in the first moments of a round is read rather than dropped.
+ */
+function probeFor(rate, uneven = 0) {
+  const seconds = 4;
+  const samples = new Float32Array(Math.round(rate * seconds));
+  const span = samples.length / BEATS;
+  const quiet = 10 ** (-uneven / 20);
+
+  for (let beat = 0; beat < BEATS; beat += 1) {
+    const level = beat % 2 === 1 ? quiet : 1;
+    const from = Math.floor(beat * span);
+    const length = Math.floor(rate * 0.22);
+
+    for (let i = 0; i < length && from + i < samples.length; i += 1) {
+      const t = i / rate;
+      // A struck sound: a low body under a bright edge, decaying fast.
+      const body = Math.sin(2 * Math.PI * 90 * t) * Math.exp(-t * 22);
+      const edge = Math.sin(2 * Math.PI * 1800 * t) * Math.exp(-t * 90);
+      samples[from + i] = 0.62 * level * (body + 0.35 * edge);
+    }
+  }
+
+  return samples;
+}
+
+/**
+ * A track for the key to work on: sustained, the way a bass is.
+ *
+ * The ducking exercise needs two stems or it is not about ducking at all. A
+ * compressor pointed at a train of hits ducks on every one of them whether or
+ * not it is keyed, so a stand-in made of hits alone let an un-keyed
+ * compressor pass for a sidechain - it measured 8.7 dB of duck and 287 ms of
+ * recovery off nothing but its own transients.
+ */
+function steadyProbe(rate) {
+  const samples = new Float32Array(Math.round(rate * 4));
+  for (let i = 0; i < samples.length; i += 1) {
+    const t = i / rate;
+    samples[i] = 0.45 * (Math.sin(2 * Math.PI * 55 * t) + 0.35 * Math.sin(2 * Math.PI * 110 * t));
+  }
+  return samples;
+}
+
+/** The audio a guess is read against - the exercise's own, never the monitor's. */
+function materialOf(puzzle) {
+  if (puzzle?.material?.samples) return puzzle.material;
+
+  const rate = 48000;
+  if ((puzzle?.settings?.exercise ?? 'match') === 'duck') {
+    const bass = steadyProbe(rate);
+    return { rate, samples: bass, even: bass, key: probeFor(rate, 0) };
+  }
+
+  return {
+    rate,
+    samples: probeFor(rate, puzzle?.uneven ?? 0),
+    even: probeFor(rate, 0),
+    key: null,
+  };
+}
+
+const settle = (guess) => ({ ...COMP_DEFAULTS, ...guess });
 
 export default {
   id: 'compression',
   label: 'Compression',
-  blurb: 'Set the compressor',
-  lede: 'Two exercises: build the same compressor you can hear on the target, '
-      + 'or take a loop whose hits are all over the place and even them out.',
-  advice: 'The hardest thing here, and the plan says so: this is difficult even for people who do it for a living. Listen to the transients and to what happens between the hits.',
+  blurb: 'Work the compressor',
+  surface: true,
+  lede: 'A compressor, and a loop running through it. Match the one on the '
+      + 'target, level out a loop that will not sit still, or key it off the '
+      + 'kick and get out of the way.',
+  opening: 'Play the loop, work the compressor, then lock it in.',
+
+  help: [
+    ['Play the loop, then work the compressor.',
+     'Drag the display sideways to move the threshold, or drag the handle at the top '
+     + 'of the curve to set the ratio. The trace beside it is what the compressor is '
+     + 'doing to this loop, hit by hit, and it follows the knobs whether or not '
+     + 'anything is playing.'],
+    ['The detector is the half nobody touches.',
+     'Peak hears transients and RMS hears loudness. The key filters decide what the '
+     + 'detector is allowed to hear, which is how you stop a kick pulling a whole mix '
+     + 'down every bar - press listen to hear what it is reacting to.'],
+    ['Auto gain is on, and it is not being polite.',
+     'A compressor changes loudness, so without it the louder side of the A/B would win '
+     + 'every time and you would never hear the compression at all.'],
+    ['You are judged on what it did, not on where the knobs are.',
+     'Two settings that treat the loop the same way are the same answer. Evening out a '
+     + 'loop has no one answer at all: it is done when the loop sits still, and '
+     + 'flattening it is not the same thing as levelling it.'],
+  ],
+  advice: 'The hardest thing here, and the plan says so: this is difficult even for people who do it for a living. Listen to the transients, and to what happens between the hits.',
 
   settings: [
     {
@@ -121,162 +248,306 @@ export default {
       options: [
         { id: 'match', label: 'Match the target' },
         { id: 'fix', label: 'Even out the loop' },
-      ],
-    },
-    {
-      id: 'source',
-      label: 'Source',
-      options: [
-        { id: 'drums', label: 'Drums' },
-        { id: 'mix', label: 'Full mix' },
+        { id: 'duck', label: 'Duck under the kick' },
       ],
     },
   ],
 
   tiers: {
-    easy: { label: 'Easy', blurb: 'Threshold and ratio, roughly', guesses: 4, attack: false },
-    medium: { label: 'Medium', blurb: 'Threshold and ratio, closer', guesses: 4, attack: false },
-    hard: { label: 'Hard', blurb: 'And the attack as well', guesses: 4, attack: true },
+    easy: { label: 'Easy', blurb: 'Threshold and ratio', guesses: 4, timing: false, knee: false },
+    medium: { label: 'Medium', blurb: 'And the timing', guesses: 4, timing: true, knee: false },
+    hard: { label: 'Hard', blurb: 'And the knee', guesses: 4, timing: true, knee: true },
   },
 
-  slots(tier) {
-    const tolerance = KNOB_TOLERANCE[tier];
-    const slots = [
-      {
-        kind: 'range',
-        id: 'threshold',
-        heading: 'threshold',
-        label: 'Where does it start working?',
-        min: -48, max: 0, step: 1, start: -12,
-        format: writeThreshold,
-        unit: 'dB', below: 'low', above: 'high',
-        ...tolerance.threshold,
-      },
-      {
-        kind: 'range',
-        id: 'ratio',
-        heading: 'ratio',
-        label: 'How hard, once it does?',
-        min: 1.5, max: 20, log: true, start: 3,
-        format: writeRatio,
-        unit: 'x', below: 'soft', above: 'hard',
-        ...tolerance.ratio,
-      },
-    ];
-
-    if (this.tiers[tier].attack) {
-      slots.push({
-        kind: 'range',
-        id: 'attack',
-        heading: 'attack',
-        narrowReading: true,
-        label: 'Does it catch the transient?',
-        min: 1, max: 100, log: true, start: 20,
-        format: writeMs,
-        unit: 'x', below: 'fast', above: 'slow',
-        ...tolerance.attack,
-      });
-    }
-
-    return slots;
+  /** The round is played on the plugin, so there is nothing to pick from. */
+  slots() {
+    return [];
   },
 
   makePuzzle(rng, tier, settings) {
-    const attack = this.tiers[tier].attack ? toStep(logPick(rng, 2, 60), 0.5) : 8;
+    const spec = this.tiers[tier];
 
     if (settings.exercise === 'fix') {
-      // The loop's hits are `uneven` dB apart; the answer is the threshold and
-      // ratio that bring them back together.
-      const uneven = toStep(9 + rng() * 6, 1);
+      // The loop's hits are `uneven` dB apart. There is no set of knobs that
+      // is the answer - the answer is a loop that sits still.
+      return { uneven: toStep(9 + rng() * 6, 1), answer: null };
+    }
+
+    if (settings.exercise === 'duck') {
       return {
-        uneven,
         answer: {
-          threshold: LOUD_PEAK_DB - uneven - THRESHOLD_UNDER,
-          ratio: toStep(RATIO_FOR(uneven), 0.5),
-          attack,
+          depth: toStep(4 + rng() * 8, 0.5),
+          recovery: toStep(logPick(rng, 120, 420), 10),
         },
       };
     }
 
-    return {
-      answer: {
-        threshold: toStep(-36 + rng() * 30, 1),
-        ratio: toStep(logPick(rng, 2, 16), 0.5),
-        attack,
-      },
+    // The threshold sits well under the peak of the bed, because the bed is
+    // drums: sparse, and quiet between the hits, so its average level is a
+    // long way below the tops. Drawn from -8 dBFS down, as the obvious range,
+    // most targets did under a decibel of work - and a target that does
+    // nothing is one that anybody matches by doing nothing. Measured on the
+    // loop: -42 does three to six decibels, -26 does one and a half to three.
+    const answer = {
+      ...COMP_DEFAULTS,
+      threshold: toStep(-42 + rng() * 16, 0.5),
+      ratio: toStep(logPick(rng, 2.5, 12), 0.1),
     };
+
+    if (spec.timing) {
+      answer.attack = toStep(logPick(rng, 1, 60), 0.5);
+      answer.release = toStep(logPick(rng, 40, 600), 5);
+    }
+    if (spec.knee) answer.knee = toStep(rng() * 18, 0.5);
+
+    return { answer };
   },
 
-  score(guess, answer, tier) {
-    const cells = this.slots(tier).map((slot) => ({
-      ...dialled(guess[slot.id], answer[slot.id], slot),
-      narrow: slot.id === 'attack',
-    }));
+  /* ---------- marking ---------- */
 
-    return { correct: cells.every((cell) => cell.state === 'hit'), cells };
+  score(guess, answer, tier, puzzle) {
+    const exercise = puzzle?.settings?.exercise ?? 'match';
+    const material = materialOf(puzzle);
+    const settings = settle(guess);
+
+    if (exercise === 'fix') return this.scoreFix(settings, material, tier, puzzle);
+    if (exercise === 'duck') return this.scoreDuck(settings, answer, material, tier);
+    return this.scoreMatch(settings, answer, material, tier);
   },
 
-  clues(tier, settings) {
-    return settings.exercise === 'fix'
-      ? [
-        { id: 'mine', label: 'Play yours', primary: true },
-        { id: 'raw', label: 'Untreated' },
-      ]
-      : [
-        { id: 'target', label: 'Play the target', primary: true },
-        { id: 'mine', label: 'Play yours' },
-        { id: 'flat', label: 'Bypass' },
-      ];
-  },
+  /**
+   * Two compressors over the same audio, compared by what they did to it.
+   *
+   * The reduction moment by moment is the compressor's whole output - depth
+   * and timing together - so the distance between two of them is the distance
+   * between two settings in the only terms that matter. Framed at five
+   * milliseconds first, so that a single sample of disagreement on a transient
+   * does not read as a wrong answer.
+   */
+  scoreMatch(guess, answer, material, tier) {
+    const { samples, rate, key } = material;
+    const mine = meanFrames(analyse(samples, rate, guess, key).gr, rate);
+    const theirs = meanFrames(analyse(samples, rate, answer, key).gr, rate);
 
-  /** A compressor from whatever settings it is handed, loudness put back. */
-  compressor(engine, { threshold, ratio, attack }, into) {
-    const node = engine.ctx.createDynamicsCompressor();
-    node.threshold.value = threshold;
-    node.knee.value = 6;
-    node.ratio.value = ratio;
-    node.attack.value = attack / 1000;
-    node.release.value = 0.16;
-
-    const trim = engine.ctx.createGain();
-    trim.gain.value = 10 ** (-makeupFor(threshold, ratio) / 20);
-
-    node.connect(trim).connect(into);
-    return node;
-  },
-
-  /** The source, trimmed so every setting means the same thing on both. */
-  levelled(engine, source, into) {
-    const level = engine.ctx.createGain();
-    level.gain.value = WORKING_PEAK / INTO_THE_CHAIN[source];
-    level.connect(into);
-    return level;
-  },
-
-  play(engine, { puzzle, clue, settings, guess }) {
-    engine.ensure();
-    const source = settings.source;
-    const bed = { seconds: 3.6, uneven: puzzle.uneven ?? 0 };
-
-    if (clue === 'flat' || clue === 'raw') {
-      engine.playBed(source, { ...bed, dest: this.levelled(engine, source, engine.out) });
-      return;
+    let sum = 0;
+    let bias = 0;
+    for (let i = 0; i < mine.length; i += 1) {
+      const off = mine[i] - theirs[i];
+      sum += off * off;
+      bias += off;
     }
 
-    const wanted = clue === 'target' ? puzzle.answer : guess;
-    const chain = this.compressor(engine, wanted, engine.out);
-    engine.playBed(source, { ...bed, dest: this.levelled(engine, source, chain) });
-  },
+    const error = Math.sqrt(sum / mine.length);
+    const depth = bias / mine.length;
+    // What is left once the depth is right: the part that is timing rather
+    // than amount, which is the half people find hard to hear.
+    const shape = Math.sqrt(Math.max(0, error * error - depth * depth));
 
-  reveal(answer) {
+    const close = COMP_CLOSE.match[tier];
+    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
+
     return {
-      symbol: writeRatio(answer.ratio),
-      name: `over ${writeThreshold(answer.threshold)}, ${writeMs(answer.attack)} attack`,
+      correct: error <= close,
+      error,
+      cells: [
+        { state, text: `${error.toFixed(1)} dB out` },
+        {
+          state,
+          text: error <= close ? 'sits on it'
+            : Math.abs(depth) > shape ? `${Math.abs(depth).toFixed(1)} dB too ${depth > 0 ? 'gentle' : 'hard'}`
+            : 'right depth, wrong timing',
+        },
+      ],
     };
   },
 
-  weak(answer) {
-    const hard = answer.ratio >= 8 ? 'hard ratios' : answer.ratio >= 4 ? 'working ratios' : 'gentle ratios';
+  /**
+   * Did the loop end up sitting still, and at what cost.
+   *
+   * Sitting still is not every beat at the same level. A kick and a snare are
+   * not the same loudness on any record ever made, and a reading that asked
+   * for it would hand full marks to the one answer an engineer would call
+   * wrong - everything flattened. What is being taken out is the fault, so
+   * what the result is held against is the same loop without the fault in it:
+   * the profile the bed would have had, which the surface renders alongside.
+   *
+   * Overall level is taken out of both first. Making the loop even is the
+   * question; making it loud is what the makeup gain is for.
+   */
+  scoreFix(guess, material, tier, puzzle) {
+    const { samples, even, rate, key } = material;
+    const { out, gr } = runCompressor(samples, rate, guess, key);
+
+    const mine = beatLevels(out);
+    const want = beatLevels(even);
+    const mean = (list) => list.reduce((a, b) => a + b, 0) / list.length;
+    const mineMean = mean(mine);
+    const wantMean = mean(want);
+
+    let sum = 0;
+    for (let i = 0; i < mine.length; i += 1) {
+      sum += ((mine[i] - mineMean) - (want[i] - wantMean)) ** 2;
+    }
+    const off = Math.sqrt(sum / mine.length);
+
+    let deepest = 0;
+    for (const value of gr) if (value < deepest) deepest = value;
+
+    const uneven = puzzle?.uneven ?? 12;
+    const ceiling = uneven + OVERWORKED;
+    const close = COMP_CLOSE.fix[tier];
+
+    const level = off <= close;
+    const gentle = -deepest <= ceiling;
+    const state = level && gentle ? HIT : (off <= close * 2.2 && gentle) ? NEAR : MISS;
+
+    return {
+      correct: level && gentle,
+      error: off,
+      cells: [
+        { state, text: `${off.toFixed(1)} dB out of line` },
+        {
+          state: gentle ? state : MISS,
+          text: !gentle ? `${(-deepest).toFixed(0)} dB of reduction — squashed`
+            : level ? 'sits still'
+            : off > uneven / 3 ? 'barely touched'
+            : 'closer',
+        },
+      ],
+    };
+  },
+
+  /** Did the bass get out of the way, by how much, and for how long. */
+  scoreDuck(guess, answer, material, tier) {
+    const { samples, rate, key } = material;
+    const { gr } = analyse(samples, rate, guess, key);
+    const got = duckOf(gr, rate);
+
+    const close = COMP_CLOSE.duck[tier];
+    const depthOff = Math.abs(got.depth - answer.depth);
+    // Time is heard in ratios, so being out by a hundred milliseconds means
+    // something different at 120 than it does at 400.
+    const stuck = got.hits === 0 || got.recovery <= 0;
+    const timeOff = stuck ? 4 : Math.abs(Math.log2(got.recovery / answer.recovery));
+
+    const depthOk = depthOff <= close;
+    const timeOk = timeOff <= 0.42; // a third of the way to twice as long
+    const state = depthOk && timeOk ? HIT : (depthOk || timeOff <= 0.8) ? NEAR : MISS;
+
+    return {
+      correct: depthOk && timeOk,
+      error: depthOff,
+      cells: [
+        {
+          state: depthOk ? HIT : depthOff <= close * 2.5 ? NEAR : MISS,
+          text: got.hits === 0 ? 'not ducking' : `${got.depth.toFixed(1)} dB of duck`,
+        },
+        {
+          state: timeOk ? HIT : timeOff <= 0.8 ? NEAR : MISS,
+          text: got.hits === 0 ? 'key it off the kick'
+            : stuck ? 'never comes back up'
+            : got.held ? `back in ${Math.round(got.recovery)} ms, when it comes back`
+            : `back in ${Math.round(got.recovery)} ms`,
+        },
+      ],
+    };
+  },
+
+  /* ---------- the surface ---------- */
+
+  mount(el, { engine, puzzle, onChange }) {
+    const exercise = puzzle.settings.exercise;
+    const spec = COMP_EXERCISES[exercise];
+    const settings = { ...COMP_DEFAULTS };
+
+    const plugin = new CompPlugin(el, {
+      engine,
+      settings,
+      onChange,
+      source: spec.source,
+      key: spec.key,
+      uneven: puzzle.uneven ?? 0,
+    });
+
+    plugin.nameOther(spec.other);
+    // In match there is a compressor on the other side of the A/B. In the
+    // other two there is nothing there: what you are comparing against is the
+    // loop untouched, which is what a bypass button is.
+    plugin.setTarget(exercise === 'match' ? puzzle.answer : { ...COMP_DEFAULTS, mix: 0 });
+
+    // The audio a guess is read against, rendered once and kept on the puzzle.
+    // The sample picker changes what you monitor and never what you are marked
+    // on - otherwise the way to pass would be to switch to pink noise, where
+    // every setting does much the same thing and every answer looks right.
+    (async () => {
+      try {
+        const signal = await engine.renderLoop(spec.source, { uneven: puzzle.uneven ?? 0 });
+        const key = spec.key ? await engine.renderLoop(spec.key) : null;
+        // The same bed without the fault in it - what evening the loop out is
+        // aiming at, and never played: it is the answer, not a clue.
+        const even = puzzle.uneven ? await engine.renderLoop(spec.source) : signal;
+        puzzle.material = {
+          rate: engine.ctx.sampleRate,
+          samples: signal.getChannelData(0),
+          even: even.getChannelData(0),
+          key: key ? key.getChannelData(0) : null,
+        };
+      } catch {
+        // No audio yet; scoring falls back to its own probe.
+      }
+    })();
+
+    return {
+      guess: () => ({ ...settings }),
+      reveal: () => {
+        if (exercise === 'match') plugin.showTarget(puzzle.answer);
+        plugin.lock();
+      },
+      toggle: () => plugin.toggle(),
+      destroy: () => plugin.destroy(),
+    };
+  },
+
+  clues() {
+    return [];
+  },
+
+  play() {
+    // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  reveal(answer, tier, puzzle) {
+    const exercise = puzzle?.settings?.exercise ?? 'match';
+
+    if (exercise === 'fix') {
+      return {
+        symbol: `${puzzle?.uneven ?? 12} dB apart`,
+        name: 'level it without flattening it',
+      };
+    }
+
+    if (exercise === 'duck') {
+      return {
+        symbol: `${answer.depth.toFixed(1)} dB`,
+        name: `of duck, back in ${Math.round(answer.recovery)} ms`,
+      };
+    }
+
+    const settings = settle(answer);
+    return {
+      symbol: writeRatio(settings.ratio),
+      name: `over ${settings.threshold.toFixed(1)} dB, `
+          + `${writeTime(settings.attack)} / ${writeTime(settings.release)}`,
+    };
+  },
+
+  weak(answer, puzzle) {
+    const exercise = puzzle?.settings?.exercise ?? 'match';
+    if (exercise === 'fix') return { key: 'levelling', label: 'levelling a loop' };
+    if (exercise === 'duck') return { key: 'sidechain', label: 'sidechain ducking' };
+
+    const ratio = settle(answer).ratio;
+    const hard = ratio >= 8 ? 'hard ratios' : ratio >= 4 ? 'working ratios' : 'gentle ratios';
     return { key: hard, label: hard };
   },
 };

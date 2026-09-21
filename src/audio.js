@@ -17,12 +17,31 @@ export function midiToFreq(midi) {
 
 export const dbToGain = (db) => 10 ** (db / 20);
 
-/** The kit, as recipes: where the noise is filtered and how long it rings. */
+/**
+ * The kit, as recipes: where the noise is filtered and how long it rings.
+ *
+ * `level` is set so that one hit at level 1 comes out where a record would
+ * put it - kick loudest, snare a couple of decibels under it, hats well down,
+ * the count-in click in between. It has to be set rather than guessed,
+ * because these pieces are made in completely different ways: the kick is an
+ * oscillator and comes out at whatever it is told, while the others are a
+ * burst of noise through a narrow band, where nearly all of what goes in is
+ * thrown away. At the same nominal level the snare landed almost eighteen
+ * decibels under the kick, which is not a drum loop, and every part of the
+ * app that wanted an audible snare had been correcting for it by hand at the
+ * call site with numbers like `level: 5`.
+ *
+ * Measured, one hit at a time, rendered offline: kick -6.2 dBFS peak,
+ * snare -8, hat -24, click -15. The three noise pieces wander by a decibel
+ * or so from render to render, because the burst is taken from a random
+ * point of the noise buffer at a random speed - which is what stops eight
+ * hats in a row sounding like one hat eight times.
+ */
 const KIT = {
   kick: { thump: 92, to: 44, decay: 0.24, level: 1.0 },
-  snare: { hz: 1900, q: 0.8, decay: 0.16, level: 0.6 },
-  hat: { hz: 9000, q: 1.1, decay: 0.05, level: 0.28 },
-  click: { hz: 2400, q: 1.4, decay: 0.035, level: 0.5 },
+  snare: { hz: 1900, q: 0.8, decay: 0.16, level: 2.9 },
+  hat: { hz: 9000, q: 1.1, decay: 0.05, level: 0.55 },
+  click: { hz: 2400, q: 1.4, decay: 0.035, level: 3.0 },
 };
 
 export class Engine {
@@ -242,6 +261,20 @@ export class Engine {
         const when = barAt + step * beat * 0.5;
         const swing = uneven && Math.floor(step / 2) % 2 === 1 ? quiet : 1;
 
+        // Two stems that only exist to be sidechained together: a kick on
+        // every beat, and a bass playing straight through it. Ducking one
+        // under the other is the thing the technique was invented for, and it
+        // cannot be shown on a bed where they are already mixed.
+        if (kind === 'kick') {
+          if (step % 2 === 0) this.drum('kick', when, { dest, level: swing });
+          continue;
+        }
+        if (kind === 'bass') {
+          this.note(bass[(bar * 8 + step) % bass.length] - 12, when, beat * 0.62,
+                    { dest, velocity: 0.95 * swing });
+          continue;
+        }
+
         if (kind !== 'instrument') {
           if (step === 0 || step === 5) this.drum('kick', when, { dest, level: swing });
           if (step === 2 || step === 6) this.drum('snare', when, { dest, level: swing });
@@ -277,9 +310,13 @@ export class Engine {
    * a decaying pattern has a chord still ringing when the splice comes round,
    * and chopping it there is an audible click on every pass.
    */
-  async renderLoop(kind, { bars = 2, bpm = 96 } = {}) {
+  async renderLoop(kind, { bars = 2, bpm = 96, uneven = 0 } = {}) {
     this.ensure();
-    if (this.loops.has(kind)) return this.loops.get(kind);
+    // `uneven` is part of what the loop is, not a way of playing it - a bed
+    // whose hits are all over the place is a different recording - so it is
+    // part of the key this is remembered under.
+    const held = `${kind}:${bars}:${bpm}:${uneven}`;
+    if (this.loops.has(held)) return this.loops.get(held);
 
     const rate = this.ctx.sampleRate;
     const beat = 60 / bpm;
@@ -294,7 +331,7 @@ export class Engine {
     scratch.master.connect(offline.destination);
 
     if (kind === 'noise') scratch.playNoiseBed(length + tail, bpm);
-    else scratch.playBed(kind, { seconds: length, at: 0, bpm });
+    else scratch.playBed(kind, { seconds: length, at: 0, bpm, uneven });
 
     const rendered = await offline.startRendering();
     const source = rendered.getChannelData(0);
@@ -306,7 +343,7 @@ export class Engine {
     // What was still ringing at the splice comes back round with it.
     for (let i = 0; i + samples < source.length; i += 1) data[i] += source[i + samples];
 
-    this.loops.set(kind, loop);
+    this.loops.set(held, loop);
     return loop;
   }
 
@@ -333,18 +370,17 @@ export class Engine {
     const beat = 60 / bpm;
     const start = at ?? this.start;
 
-    // Struck hard: a kit piece is a burst of noise through a narrow band, so
-    // most of what goes in never comes out. At the levels the band plays at in
-    // the bed these came back peaking at 0.06, which is a clue nobody can hear
-    // without reaching for the volume - and a rhythm you cannot hear is not a
-    // rhythm test.
+    // The first click of the count-in is the one you set your foot by, so it
+    // is a little louder than the three that follow. The corrections that used
+    // to be here are gone: the kit's own levels now mean something, so asking
+    // for one is enough.
     for (let i = 0; i < countIn; i += 1) {
-      this.drum('click', start + i * beat, { dest, level: i === 0 ? 4.5 : 2.6 });
+      this.drum('click', start + i * beat, { dest, level: i === 0 ? 1.3 : 0.75 });
     }
 
     const patternAt = start + countIn * beat;
     for (const position of beats) {
-      this.drum('snare', patternAt + position * beat, { dest, level: 5 });
+      this.drum('snare', patternAt + position * beat, { dest, level: 1 });
     }
 
     return patternAt;

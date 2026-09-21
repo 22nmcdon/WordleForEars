@@ -5,6 +5,7 @@ import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
 import { HIT, NEAR, MISS } from '../src/modes/scoring.js';
 import {
   makePuzzle, createGame, submitGuess, combinationsFor, reveal, settingsFor, startingGuess,
+  scoreGuess,
 } from '../src/game.js';
 import { answerAsGuess, wrongGuess, everyRound } from './helpers.js';
 
@@ -100,7 +101,10 @@ test('matching exactly what was played wins, in every mode, tier and exercise', 
   for (const [id, tier, settings] of ROUNDS) {
     const chosen = settingsFor(id, settings);
     const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `win-${id}-${tier}` });
-    const score = MODES[id].score(answerAsGuess(puzzle), puzzle.answer, tier);
+    const perfect = answerAsGuess(puzzle);
+    // Some exercises are marked on the result and keep no answer to play back.
+    if (perfect === null) continue;
+    const score = scoreGuess(perfect, puzzle);
 
     assert.ok(score.correct, `${id}/${tier} does not accept its own answer`);
     for (const cell of score.cells) {
@@ -113,7 +117,7 @@ test('a wrong guess is read as wrong, and says which way to move', () => {
   for (const [id, tier, settings] of ROUNDS) {
     const chosen = settingsFor(id, settings);
     const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `miss-${id}-${tier}` });
-    const score = MODES[id].score(wrongGuess(puzzle), puzzle.answer, tier);
+    const score = scoreGuess(wrongGuess(puzzle), puzzle);
 
     assert.ok(!score.correct, `${id}/${tier} accepted a guess outside every tolerance`);
 
@@ -258,17 +262,12 @@ test('the EQ says where the two curves part company, and which way', () => {
   assert.equal(MODES.eq.score(target, target, 'easy').cells[1].text, 'sits on it');
 });
 
-test('evening out a loop asks for the settings that measurably even it out', () => {
+test('evening out a loop hands you an uneven loop and no answer to copy', () => {
   for (const seed of ['even', 'even-2', 'even-3']) {
     const puzzle = makePuzzle({ mode: 'compression', tier: 'medium', settings: { exercise: 'fix' }, seed });
 
     assert.ok(puzzle.uneven >= 9 && puzzle.uneven <= 15, 'the loop has to be uneven to need evening');
-
-    // Well under the quiet hits, and harder than the paper arithmetic - which
-    // is what the rendered grid says it takes. See the mode for why.
-    assert.equal(puzzle.answer.threshold, -6 - puzzle.uneven - 9);
-    assert.ok(Math.abs(puzzle.answer.ratio - puzzle.uneven / 2.5) <= 0.5);
-    assert.ok(puzzle.answer.ratio > puzzle.uneven / 4, 'a gentle ratio does not level anything');
+    assert.equal(puzzle.answer, null, 'there is no one setting that levels a loop');
   }
 });
 
@@ -281,14 +280,13 @@ test('chords: the reading is made from the shape, so the root cannot leak into i
 });
 
 test('compression: too gentle and too hard are told apart', () => {
-  const answer = { threshold: -20, ratio: 8, attack: 10 };
-  const soft = MODES.compression.score({ threshold: -20, ratio: 2, attack: 10 }, answer, 'medium');
-  assert.equal(soft.cells[1].state, MISS);
-  assert.match(soft.cells[1].text, /soft$/);
+  const answer = { threshold: -20, ratio: 8, attack: 10, release: 120 };
+  const soft = MODES.compression.score({ ...answer, ratio: 1.5 }, answer, 'medium');
+  assert.equal(soft.cells[0].state, MISS);
+  assert.match(soft.cells[1].text, /too gentle$/);
 
-  const nearly = MODES.compression.score({ threshold: -20, ratio: 16, attack: 10 }, answer, 'medium');
-  assert.equal(nearly.cells[1].state, NEAR);
-  assert.match(nearly.cells[1].text, /hard$/);
+  const hard = MODES.compression.score({ ...answer, threshold: -40, ratio: 20 }, answer, 'medium');
+  assert.match(hard.cells[1].text, /too hard$/);
 });
 
 test('panning: the reading says how far off and on which side', () => {
@@ -356,7 +354,16 @@ test('a whole round can be played out in every mode, tier and exercise', () => {
     for (let i = 0; i < game.allowed - 1; i += 1) game = submitGuess(game, wrongGuess(puzzle, i));
     assert.equal(game.status, 'playing', `${id}/${tier} ended early`);
 
-    game = submitGuess(game, answerAsGuess(puzzle));
+    const perfect = answerAsGuess(puzzle);
+    if (perfect === null) {
+      // An exercise marked on the result has no answer to play back, so what
+      // is checked is that it runs out cleanly rather than hanging on.
+      game = submitGuess(game, wrongGuess(puzzle, game.allowed));
+      assert.equal(game.status, 'lost', `${id}/${tier} did not run out`);
+      continue;
+    }
+
+    game = submitGuess(game, perfect);
     assert.equal(game.status, 'won', `${id}/${tier} did not accept the answer`);
   }
 });

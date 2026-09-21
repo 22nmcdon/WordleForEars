@@ -1,0 +1,745 @@
+import { staticGain, COMP_DEFAULTS } from './dsp.js';
+import { CompPlayer } from './player.js';
+
+/**
+ * The compressor, as a plugin you work rather than a question you answer.
+ *
+ * Three things to look at, which is what every compressor puts in front of
+ * you: the curve, which is what it would do to a steady level; the trace,
+ * which is what it is actually doing to this loop, hit by hit; and the meters,
+ * which are what it is doing right now. The curve is a prediction, the trace
+ * is the whole bar, and the meter is the moment - and a compressor is hard to
+ * learn precisely because those three are not the same thing.
+ */
+
+const DB_LOW = -60;    // the quietest input the curve bothers with
+const GR_DEPTH = 24;   // how far down the trace reads
+
+const compX = (db, width) => ((db - DB_LOW) / -DB_LOW) * width;
+const compY = (db, height) => height - ((db - DB_LOW) / -DB_LOW) * height;
+const compDbX = (x, width) => DB_LOW + (x / width) * -DB_LOW;
+const compDbY = (y, height) => DB_LOW + ((height - y) / height) * -DB_LOW;
+
+const holdIn = (value, low, high) => Math.min(high, Math.max(low, value));
+
+export const writeTime = (ms) => (ms < 10 ? `${ms.toFixed(1)} ms` : `${Math.round(ms)} ms`);
+export const writeRatio = (ratio) => (ratio >= 19.95 ? '∞ : 1' : `${ratio.toFixed(1)} : 1`);
+export const writeDbValue = (db) => `${db > 0 ? '+' : ''}${db.toFixed(1)} dB`;
+export const writeHertz = (hz) => (hz >= 1000 ? `${(hz / 1000).toFixed(1)} kHz` : `${Math.round(hz)} Hz`);
+
+/** Everything with a knob on it, and how each one reads. */
+const COMP_KNOBS = [
+  { id: 'threshold', name: 'Threshold', min: -60, max: 0, step: 0.5, write: (v) => `${v.toFixed(1)} dB` },
+  { id: 'ratio', name: 'Ratio', min: 1, max: 20, log: true, write: writeRatio },
+  { id: 'attack', name: 'Attack', min: 0.1, max: 200, log: true, write: writeTime },
+  { id: 'release', name: 'Release', min: 5, max: 2000, log: true, write: writeTime },
+  { id: 'knee', name: 'Knee', min: 0, max: 24, step: 0.5, write: (v) => `${v.toFixed(1)} dB` },
+  { id: 'makeup', name: 'Makeup', min: -12, max: 24, step: 0.5, write: writeDbValue },
+  { id: 'mix', name: 'Mix', min: 0, max: 1, step: 0.01, write: (v) => `${Math.round(v * 100)} %` },
+  { id: 'lookahead', name: 'Lookahead', min: 0, max: 20, step: 0.5, write: writeTime },
+];
+
+/** The detector's own controls - the half of a compressor nobody touches. */
+const COMP_SIDECHAIN = [
+  { id: 'scHigh', name: 'Key high-pass', min: 20, max: 1000, log: true, write: writeHertz },
+  { id: 'scLow', name: 'Key low-pass', min: 200, max: 20000, log: true, write: writeHertz },
+];
+
+const slider = (knob, value) => (knob.log
+  ? { min: Math.log2(knob.min), max: Math.log2(knob.max), step: 0.01, at: Math.log2(Math.max(knob.min, value)) }
+  : { min: knob.min, max: knob.max, step: knob.step, at: value });
+
+const fromSlider = (knob, raw) => (knob.log ? 2 ** Number(raw) : Number(raw));
+
+/** The colours, read off the page so the plugin follows whatever light it is in. */
+function compPalette(el) {
+  const style = getComputedStyle(el);
+  const read = (name) => style.getPropertyValue(name).trim();
+  return {
+    ink: read('--charcoal'),
+    accent: read('--blush-deep'),
+    blush: read('--blush'),
+    gold: read('--gold'),
+    sage: read('--sage'),
+    rust: read('--rust'),
+    enclosure: read('--enclosure'),
+    paper: read('--paper'),
+    soft: 'rgba(250, 246, 240, 0.55)',
+    grid: 'rgba(250, 246, 240, 0.14)',
+    faint: 'rgba(250, 246, 240, 0.08)',
+    zero: 'rgba(250, 246, 240, 0.34)',
+  };
+}
+
+export class CompPlugin {
+  constructor(el, { engine, settings, onChange, source = 'drums', key = null, uneven = 0 }) {
+    this.el = el;
+    this.engine = engine;
+    this.settings = settings;
+    this.onChange = onChange;
+    this.interactive = true;
+    this.target = null;      // drawn only once the round is over
+    this.meterGr = 0;
+    this.columns = null;
+
+    this.player = new CompPlayer(engine, { source, key, uneven });
+    this.player.setSettings(this.settings);
+
+    this.build();
+    this.draw();
+
+    // The loop is rendered rather than played, so the trace can be there
+    // before anybody presses anything.
+    this.player.prepare().then(() => { this.restage(); this.draw(); }).catch(() => {});
+  }
+
+  /* ---------- the furniture ---------- */
+
+  build() {
+    const keyed = Boolean(this.player.key);
+
+    this.el.innerHTML = `
+      <div class="comp">
+        <div class="comp-head">
+          <span class="comp-name">Compressor</span>
+          <span class="comp-trim" id="compTrim"></span>
+          <span class="comp-read" id="compRead"></span>
+        </div>
+
+        <div class="comp-display">
+          <div class="comp-panel comp-panel-curve">
+            <canvas id="compCurve"></canvas>
+          </div>
+          <div class="comp-panel comp-panel-trace">
+            <canvas id="compTrace"></canvas>
+          </div>
+          <div class="comp-panel comp-panel-meters">
+            <canvas id="compMeters"></canvas>
+          </div>
+        </div>
+
+        <div class="comp-controls" id="compKnobs"></div>
+
+        <div class="comp-detector">
+          <div class="comp-detector-head">
+            <span class="comp-section">Detector</span>
+            <div class="eq-ab" role="group" aria-label="How the level is measured">
+              <button class="ab-btn is-on" type="button" data-detector="peak">Peak</button>
+              <button class="ab-btn" type="button" data-detector="rms">RMS</button>
+            </div>
+            <label class="comp-toggle" ${keyed ? '' : 'hidden'}>
+              <input type="checkbox" id="compSidechain"> Key from the ${this.player.key === 'kick' ? 'kick' : 'other track'}
+            </label>
+            <button class="ab-btn listen-btn" type="button" data-comp="listen" aria-pressed="false">Listen to the key</button>
+          </div>
+          <div class="comp-controls" id="compKeyKnobs"></div>
+        </div>
+
+        <div class="eq-transport comp-transport">
+          <button class="play-btn" type="button" data-comp="play">Play</button>
+          <div class="eq-ab" role="group" aria-label="What you are hearing">
+            <button class="ab-btn is-on" type="button" data-hear="mine">Yours</button>
+            <button class="ab-btn" type="button" data-hear="theirs" id="compOther">Target</button>
+          </div>
+          <label class="comp-toggle">
+            <input type="checkbox" id="compAuto" checked> Auto gain
+          </label>
+          <label class="field">
+            <span class="field-label">Sample</span>
+            <select id="compSource">
+              <option value="drums">Drums</option>
+              <option value="mix">Full mix</option>
+              <option value="bass">Bass</option>
+              <option value="instrument">Keys</option>
+              <option value="yours" id="compYours" hidden>Your own</option>
+            </select>
+          </label>
+          <label class="file-btn">Open a file<input type="file" id="compFile" accept="audio/*"></label>
+          <button class="link-btn" type="button" data-comp="reset">Reset</button>
+        </div>
+      </div>`;
+
+    this.curve = this.el.querySelector('#compCurve');
+    this.trace = this.el.querySelector('#compTrace');
+    this.meters = this.el.querySelector('#compMeters');
+    this.el.querySelector('#compSource').value = this.player.source;
+
+    this.buildKnobs();
+    this.wire();
+  }
+
+  buildKnobs() {
+    const write = (knobs) => knobs.map((knob) => {
+      const dial = slider(knob, this.settings[knob.id]);
+      return `
+        <div class="knob" data-knob="${knob.id}">
+          <label class="knob-name" for="comp-${knob.id}">${knob.name}</label>
+          <output class="knob-value" id="comp-${knob.id}-value">${knob.write(this.settings[knob.id])}</output>
+          <input class="knob-dial" type="range" id="comp-${knob.id}" data-dial="${knob.id}"
+                 min="${dial.min}" max="${dial.max}" step="${dial.step}" value="${dial.at}"
+                 aria-label="${knob.name}">
+        </div>`;
+    }).join('');
+
+    this.el.querySelector('#compKnobs').innerHTML = write(COMP_KNOBS);
+    this.el.querySelector('#compKeyKnobs').innerHTML = write(COMP_SIDECHAIN);
+    this.syncKnobs();
+  }
+
+  /* ---------- working it ---------- */
+
+  wire() {
+    for (const holder of ['#compKnobs', '#compKeyKnobs']) {
+      this.el.querySelector(holder).addEventListener('input', (e) => {
+        const dial = e.target.closest('[data-dial]');
+        if (!dial || !this.interactive) return;
+        const knob = [...COMP_KNOBS, ...COMP_SIDECHAIN].find((k) => k.id === dial.dataset.dial);
+        this.settings[knob.id] = fromSlider(knob, dial.value);
+        this.changed();
+      });
+    }
+
+    this.curve.addEventListener('pointerdown', (e) => this.grab(e));
+    this.curve.addEventListener('pointermove', (e) => this.drag(e));
+    this.curve.addEventListener('pointerup', (e) => this.drop(e));
+    this.curve.addEventListener('pointercancel', (e) => this.drop(e));
+
+    this.el.addEventListener('click', (e) => {
+      const hear = e.target.closest('[data-hear]');
+      if (hear) {
+        this.player.hear(hear.dataset.hear);
+        for (const button of this.el.querySelectorAll('[data-hear]')) {
+          button.classList.toggle('is-on', button === hear);
+        }
+        return;
+      }
+
+      const detector = e.target.closest('[data-detector]');
+      if (detector && this.interactive) {
+        this.settings.detector = detector.dataset.detector;
+        for (const button of this.el.querySelectorAll('[data-detector]')) {
+          button.classList.toggle('is-on', button === detector);
+        }
+        this.changed();
+        return;
+      }
+
+      const action = e.target.closest('[data-comp]');
+      if (!action) return;
+      if (action.dataset.comp === 'play') this.toggle();
+      if (action.dataset.comp === 'listen') this.toggleListen();
+      if (action.dataset.comp === 'reset' && this.interactive) {
+        Object.assign(this.settings, COMP_DEFAULTS);
+        this.buildKnobs();
+        this.changed();
+      }
+    });
+
+    this.el.querySelector('#compAuto').addEventListener('change', (e) => {
+      this.player.setAuto(e.target.checked);
+      this.el.querySelector('[data-knob="makeup"]').classList.toggle('is-auto', e.target.checked);
+      this.writeReadout();
+    });
+
+    const sidechain = this.el.querySelector('#compSidechain');
+    sidechain?.addEventListener('change', (e) => {
+      this.settings.sidechain = e.target.checked;
+      this.changed();
+    });
+
+    this.el.querySelector('#compSource').addEventListener('change', async (e) => {
+      this.player.source = e.target.value;
+      this.player.samples = null;
+      await this.player.prepare();
+      if (this.player.playing) await this.player.play();
+      this.restage();
+      this.draw();
+    });
+
+    this.el.querySelector('#compFile').addEventListener('change', (e) => this.open(e));
+
+    this.resize = () => { this.restage(); this.draw(); };
+    window.addEventListener('resize', this.resize);
+  }
+
+  async open(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const yours = this.el.querySelector('#compYours');
+    yours.hidden = false;
+    yours.textContent = 'reading…';
+
+    try {
+      const buffer = await this.player.load(file);
+      this.el.querySelector('#compSource').value = 'yours';
+      this.player.source = 'yours';
+      this.player.samples = null;
+      await this.player.prepare();
+      // Straight onto it: somebody who has just chosen a file wants to hear
+      // their own material, not to be told it loaded.
+      await this.player.play();
+      this.playing(true);
+      yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
+    } catch {
+      yours.textContent = 'that file could not be read';
+      return;
+    }
+
+    this.restage();
+    this.draw();
+  }
+
+  /**
+   * The curve is a control surface, not a picture.
+   *
+   * Two handles, each on the axis that means something there: the knee moves
+   * sideways and that is the threshold, the top of the curve moves up and
+   * down and that is the ratio - which is exactly what the ratio looks like,
+   * since it is how far the loud end has been pulled towards the quiet one.
+   */
+  handles() {
+    const { width, height } = this.sizeOf(this.curve);
+    const { threshold, ratio, knee } = this.settings;
+    const topDb = staticGain(0, threshold, ratio, knee);
+
+    // Held off the edges: the ratio's handle lives at full scale, which is the
+    // right-hand wall, and a circle centred on the wall is a half circle.
+    const inside = (x) => holdIn(x, 9, width - 9);
+
+    return {
+      knee: { x: inside(compX(threshold, width)), y: holdIn(compY(threshold, height), 9, height - 9), id: 'threshold' },
+      ratio: { x: inside(compX(0, width)), y: holdIn(compY(topDb, height), 9, height - 9), id: 'ratio' },
+    };
+  }
+
+  grab(e) {
+    if (!this.interactive) return;
+    const at = this.on(this.curve, e);
+    const handles = this.handles();
+
+    const near = (handle) => (at.x - handle.x) ** 2 + (at.y - handle.y) ** 2 < 24 ** 2;
+    this.holding = near(handles.ratio) ? 'ratio' : near(handles.knee) ? 'threshold' : null;
+    // Anywhere else on the display is the threshold: it is the control people
+    // reach for, and hunting for a handle is not what a compressor feels like.
+    if (!this.holding) this.holding = 'threshold';
+
+    this.curve.setPointerCapture(e.pointerId);
+    this.drag(e);
+  }
+
+  drag(e) {
+    if (!this.holding || !this.interactive) return;
+    const { width, height } = this.sizeOf(this.curve);
+    const at = this.on(this.curve, e);
+
+    if (this.holding === 'threshold') {
+      this.settings.threshold = holdIn(Math.round(compDbX(at.x, width) * 2) / 2, -60, 0);
+    } else {
+      // Where the top of the curve has been dragged to, solved back into a
+      // ratio: at 0 dBFS in, the output sits at -threshold/ratio + threshold.
+      const wanted = holdIn(compDbY(at.y, height), DB_LOW, 0);
+      const span = -this.settings.threshold;
+      const left = wanted - this.settings.threshold;
+      this.settings.ratio = span <= 0.5 || left <= 0.01
+        ? 20
+        : holdIn(Math.round((span / left) * 10) / 10, 1, 20);
+    }
+
+    this.syncKnobs();
+    this.changed();
+  }
+
+  drop(e) {
+    if (!this.holding) return;
+    this.holding = null;
+    try { this.curve.releasePointerCapture(e.pointerId); } catch { /* it had let go */ }
+  }
+
+  on(canvas, e) {
+    const box = canvas.getBoundingClientRect();
+    return { x: e.clientX - box.left, y: e.clientY - box.top };
+  }
+
+  changed() {
+    this.player.setSettings(this.settings);
+    this.restage();
+    this.draw();
+    this.onChange?.(this.settings);
+  }
+
+  syncKnobs() {
+    for (const knob of [...COMP_KNOBS, ...COMP_SIDECHAIN]) {
+      const value = this.settings[knob.id];
+      const readout = this.el.querySelector(`#comp-${knob.id}-value`);
+      const dial = this.el.querySelector(`#comp-${knob.id}`);
+      if (readout) readout.textContent = knob.write(value);
+      if (dial && document.activeElement !== dial) {
+        dial.value = knob.log ? Math.log2(Math.max(knob.min, value)) : value;
+      }
+    }
+  }
+
+  /** Hear what the detector hears, which is how a sidechain gets aimed. */
+  toggleListen() {
+    const button = this.el.querySelector('[data-comp="listen"]');
+    const on = button.getAttribute('aria-pressed') !== 'true';
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    button.classList.toggle('is-on', on);
+    this.settings.listen = on;
+    this.player.setSettings(this.settings);
+    this.player.push();
+  }
+
+  async toggle() {
+    if (this.player.playing) {
+      this.player.stop();
+      this.playing(false);
+      this.draw();
+      return;
+    }
+    await this.player.play();
+    this.playing(true);
+  }
+
+  playing(on) {
+    this.el.querySelector('[data-comp="play"]').textContent = on ? 'Stop' : 'Play';
+    cancelAnimationFrame(this.frame);
+    this.frame = null;
+    if (!on) { this.draw(); return; }
+
+    const tick = () => {
+      this.draw();
+      this.frame = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  /* ---------- drawing ---------- */
+
+  sizeOf(canvas) {
+    const box = canvas.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  }
+
+  /** Sets a canvas up for its own pixels, and hands back a context. */
+  ready(canvas) {
+    const { width, height } = this.sizeOf(canvas);
+    if (!width || !height) return null;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(width * dpr)) {
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+    }
+
+    const c = canvas.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, width, height);
+    return { c, width, height };
+  }
+
+  /**
+   * The loop, boiled down to one value per pixel column.
+   *
+   * Five seconds at forty-eight thousand samples is a quarter of a million
+   * numbers behind a display five hundred pixels wide, and walking all of them
+   * sixty times a second to draw the same picture would leave nothing for the
+   * audio. It is redone when the settings change, which is when it differs.
+   */
+  restage() {
+    const { width } = this.sizeOf(this.trace);
+    const gr = this.player.trace;
+    const samples = this.player.samples;
+    if (!width || !gr || !samples) return;
+
+    const columns = Math.max(1, Math.round(width));
+    const deepest = new Float32Array(columns);
+    const loudest = new Float32Array(columns);
+    const per = samples.length / columns;
+
+    for (let x = 0; x < columns; x += 1) {
+      const from = Math.floor(x * per);
+      const to = Math.min(samples.length, Math.floor((x + 1) * per));
+      let low = 0;
+      let peak = 0;
+
+      for (let i = from; i < to; i += 1) {
+        if (gr[i] < low) low = gr[i];
+        const level = samples[i] < 0 ? -samples[i] : samples[i];
+        if (level > peak) peak = level;
+      }
+
+      deepest[x] = low;
+      loudest[x] = peak;
+    }
+
+    this.columns = { deepest, loudest, width: columns };
+    this.targetColumns = null;
+
+    if (this.target && this.player.targetTrace) {
+      const theirs = new Float32Array(columns);
+      const trace = this.player.targetTrace;
+      for (let x = 0; x < columns; x += 1) {
+        const from = Math.floor(x * per);
+        const to = Math.min(trace.length, Math.floor((x + 1) * per));
+        let low = 0;
+        for (let i = from; i < to; i += 1) if (trace[i] < low) low = trace[i];
+        theirs[x] = low;
+      }
+      this.targetColumns = theirs;
+    }
+  }
+
+  draw() {
+    const ink = compPalette(this.el);
+    this.drawCurve(ink);
+    this.drawTrace(ink);
+    this.drawMeters(ink);
+    this.writeReadout();
+  }
+
+  drawCurve(ink) {
+    const stage = this.ready(this.curve);
+    if (!stage) return;
+    const { c, width, height } = stage;
+    const { threshold, ratio, knee } = this.settings;
+
+    // The grid, every 12 dB, and the line where nothing happens.
+    c.strokeStyle = ink.grid;
+    c.lineWidth = 1;
+    for (let db = DB_LOW; db <= 0; db += 12) {
+      const x = compX(db, width);
+      const y = compY(db, height);
+      c.beginPath(); c.moveTo(x, 0); c.lineTo(x, height); c.stroke();
+      c.beginPath(); c.moveTo(0, y); c.lineTo(width, y); c.stroke();
+    }
+
+    c.strokeStyle = ink.zero;
+    c.setLineDash([4, 4]);
+    c.beginPath(); c.moveTo(0, height); c.lineTo(width, 0); c.stroke();
+    c.setLineDash([]);
+
+    const at = (db) => db + staticGain(db, threshold, ratio, knee);
+
+    // What is being taken off, as the gap between doing this and doing
+    // nothing - the area is the compression, and it grows as you work it.
+    c.beginPath();
+    c.moveTo(compX(DB_LOW, width), compY(DB_LOW, height));
+    for (let db = DB_LOW; db <= 0; db += 0.5) c.lineTo(compX(db, width), compY(at(db), height));
+    c.lineTo(compX(0, width), compY(0, height));
+    c.closePath();
+    c.fillStyle = 'rgba(192, 127, 121, 0.22)';
+    c.fill();
+
+    c.beginPath();
+    for (let db = DB_LOW; db <= 0; db += 0.5) {
+      const x = compX(db, width);
+      const y = compY(at(db), height);
+      if (db === DB_LOW) c.moveTo(x, y); else c.lineTo(x, y);
+    }
+    c.strokeStyle = ink.blush;
+    c.lineWidth = 2.5;
+    c.stroke();
+
+    // The target's curve, once the round is over.
+    if (this.target) {
+      c.beginPath();
+      for (let db = DB_LOW; db <= 0; db += 0.5) {
+        const y = compY(db + staticGain(db, this.target.threshold, this.target.ratio, this.target.knee), height);
+        const x = compX(db, width);
+        if (db === DB_LOW) c.moveTo(x, y); else c.lineTo(x, y);
+      }
+      c.strokeStyle = ink.sage;
+      c.lineWidth = 2;
+      c.setLineDash([6, 4]);
+      c.stroke();
+      c.setLineDash([]);
+    }
+
+    // Where the signal is sitting right now, and what is happening to it.
+    if (this.player.playing) {
+      const level = this.player.levels().input;
+      if (level > DB_LOW) {
+        const x = compX(holdIn(level, DB_LOW, 0), width);
+        const y = compY(holdIn(level + this.meterGr, DB_LOW, 0), height);
+        c.beginPath();
+        c.arc(x, y, 4.5, 0, Math.PI * 2);
+        c.fillStyle = ink.gold;
+        c.fill();
+      }
+    }
+
+    if (this.interactive) {
+      const handles = this.handles();
+      for (const handle of [handles.knee, handles.ratio]) {
+        c.beginPath();
+        c.arc(handle.x, handle.y, 6, 0, Math.PI * 2);
+        c.fillStyle = ink.paper;
+        c.fill();
+        c.strokeStyle = ink.accent;
+        c.lineWidth = 2;
+        c.stroke();
+      }
+    }
+
+    c.fillStyle = ink.soft;
+    c.font = '10px system-ui, sans-serif';
+    c.textAlign = 'left';
+    c.fillText('in →', 6, height - 6);
+    c.save();
+    c.translate(10, 14);
+    c.fillText('out ↑', 0, 0);
+    c.restore();
+  }
+
+  drawTrace(ink) {
+    const stage = this.ready(this.trace);
+    if (!stage) return;
+    const { c, width, height } = stage;
+
+    const grY = (db) => (-db / GR_DEPTH) * height;
+
+    c.strokeStyle = ink.grid;
+    c.lineWidth = 1;
+    c.font = '9.5px system-ui, sans-serif';
+    c.fillStyle = ink.soft;
+    c.textAlign = 'right';
+    for (let db = -6; db >= -GR_DEPTH; db -= 6) {
+      const y = grY(db);
+      c.beginPath(); c.moveTo(0, y); c.lineTo(width, y); c.stroke();
+      c.fillText(`${db}`, width - 4, y - 3);
+    }
+
+    if (!this.columns) return;
+    const { deepest, loudest, width: columns } = this.columns;
+    const span = width / columns;
+
+    // What the compressor is working on, behind what it is doing about it.
+    c.beginPath();
+    c.moveTo(0, height);
+    for (let x = 0; x < columns; x += 1) {
+      c.lineTo(x * span, height - Math.min(1, loudest[x] * 1.6) * height * 0.55);
+    }
+    c.lineTo(width, height);
+    c.closePath();
+    c.fillStyle = ink.faint;
+    c.fill();
+
+    // The reduction, hanging from the top the way every meter draws it.
+    const hang = (values, fill, stroke) => {
+      c.beginPath();
+      c.moveTo(0, 0);
+      for (let x = 0; x < columns; x += 1) c.lineTo(x * span, grY(Math.max(values[x], -GR_DEPTH)));
+      c.lineTo(width, 0);
+      c.closePath();
+      if (fill) { c.fillStyle = fill; c.fill(); }
+      if (stroke) { c.strokeStyle = stroke; c.lineWidth = 1.5; c.stroke(); }
+    };
+
+    if (this.targetColumns) hang(this.targetColumns, 'rgba(111, 127, 99, 0.24)', ink.sage);
+    hang(deepest, 'rgba(217, 166, 160, 0.26)', ink.blush);
+
+    const position = this.player.position;
+    if (position !== null) {
+      const x = position * width;
+      c.strokeStyle = ink.gold;
+      c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(x, 0); c.lineTo(x, height); c.stroke();
+    }
+
+    c.fillStyle = ink.soft;
+    c.textAlign = 'left';
+    c.fillText('gain reduction, over the loop', 6, height - 6);
+  }
+
+  drawMeters(ink) {
+    const stage = this.ready(this.meters);
+    if (!stage) return;
+    const { c, width, height } = stage;
+
+    // The live reduction falls back rather than snapping, the way a needle
+    // does - a meter that jumped straight back to nothing would be unreadable.
+    const fresh = this.player.playing ? this.player.reduction() : 0;
+    this.meterGr = this.player.playing ? Math.min(fresh, this.meterGr + 0.8) : 0;
+
+    const { input, output } = this.player.levels();
+    const top = 16;
+    const floor = height - 14;
+    const run = floor - top;
+    const bars = [
+      { label: 'in', value: holdIn((input + 60) / 60, 0, 1), colour: ink.soft, from: 'bottom' },
+      { label: 'gr', value: holdIn(-this.meterGr / GR_DEPTH, 0, 1), colour: ink.blush, from: 'top' },
+      { label: 'out', value: holdIn((output + 60) / 60, 0, 1), colour: ink.soft, from: 'bottom' },
+    ];
+
+    const lane = width / bars.length;
+    const bar = Math.min(12, lane - 8);
+
+    bars.forEach((meter, i) => {
+      const x = i * lane + (lane - bar) / 2;
+      c.fillStyle = 'rgba(250, 246, 240, 0.09)';
+      c.fillRect(x, top, bar, run);
+
+      const length = meter.value * run;
+      c.fillStyle = meter.colour;
+      if (meter.from === 'top') c.fillRect(x, top, bar, length);
+      else c.fillRect(x, floor - length, bar, length);
+
+      c.fillStyle = ink.soft;
+      c.font = '9px system-ui, sans-serif';
+      c.textAlign = 'center';
+      c.fillText(meter.label, i * lane + lane / 2, height - 3);
+    });
+  }
+
+  writeReadout() {
+    const reading = this.player.reading;
+    const trim = this.el.querySelector('#compTrim');
+
+    if (this.player.auto && reading) {
+      trim.textContent = Math.abs(reading.makeup) < 0.1
+        ? 'auto gain · none'
+        : `auto gain · ${writeDbValue(reading.makeup)}`;
+    } else {
+      trim.textContent = 'auto gain · off';
+    }
+
+    const { threshold, ratio, attack, release } = this.settings;
+    const parts = [
+      `${writeRatio(ratio)} over ${threshold.toFixed(1)} dB`,
+      `${writeTime(attack)} / ${writeTime(release)}`,
+    ];
+    if (reading) parts.push(`${reading.deepest.toFixed(1)} dB deepest`);
+    if (this.settings.sidechain) parts.push('keyed');
+    this.el.querySelector('#compRead').textContent = parts.join(' · ');
+  }
+
+  /* ---------- what the round does to it ---------- */
+
+  setTarget(target) {
+    this.player.setTarget(target);
+  }
+
+  showTarget(target) {
+    this.target = target;
+    this.player.setTarget(target);
+    this.restage();
+    this.draw();
+  }
+
+  nameOther(label) {
+    this.el.querySelector('#compOther').textContent = label;
+  }
+
+  lock() {
+    this.interactive = false;
+    this.el.querySelector('.comp').classList.add('is-locked');
+  }
+
+  destroy() {
+    cancelAnimationFrame(this.frame);
+    window.removeEventListener('resize', this.resize);
+    this.player.destroy();
+  }
+}

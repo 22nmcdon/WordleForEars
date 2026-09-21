@@ -653,6 +653,138 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   .eq-controls { grid-template-columns: 1fr; }
 }
 
+/* --- the compressor -------------------------------------------------------- */
+/* Three readings of the same thing, side by side, because a compressor is the
+   one processor where the picture, the bar and the moment genuinely differ:
+   the curve is what it would do, the trace is what it did to this loop, and
+   the meter is what it is doing now. Dark, like the EQ, and for the same
+   reason - this is how a plugin looks, and inverting it for the sake of the
+   page would cost more in legibility than it gained in manners. */
+.comp { display: flex; flex-direction: column; gap: 12px; }
+
+.comp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+.comp-name {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-weight: 500;
+  color: var(--blush-deep);
+}
+/* Reads the same as the EQ's, and deliberately does not restate it: a second
+   rule for the same thing is a second rule to keep in step. */
+.comp-trim {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.comp-read {
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--charcoal);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The curve is squarish because it is a graph of one thing against another
+   and a stretched one lies about the slope; the trace takes what is left,
+   because time is what there is a lot of. */
+.comp-display {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) 2fr 58px;
+  gap: 8px;
+  height: clamp(190px, 32vh, 290px);
+}
+.comp-panel {
+  position: relative;
+  background: var(--charcoal);
+  border: 1px solid var(--charcoal);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.comp-panel canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.comp-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 20px;
+}
+/* Auto gain is holding the makeup knob, and says so by standing back from it
+   rather than by disappearing - the number on it is still worth reading. */
+.comp-controls .knob.is-auto { opacity: 0.45; }
+.comp-controls .knob.is-auto .knob-dial { pointer-events: none; }
+
+/* The detector: its own panel, because what a compressor is listening to is a
+   separate question from what it does about it, and the two get confused. */
+.comp-detector {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.comp-detector-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.comp-section {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-weight: 500;
+  color: var(--text-soft);
+}
+.comp-detector .listen-btn {
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  padding: 7px 15px;
+  color: var(--text-soft);
+}
+.comp-detector .listen-btn:hover { border-color: var(--blush); color: var(--blush-deep); }
+.comp-detector .listen-btn.is-on { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
+
+.comp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+.comp-toggle input { accent-color: var(--blush-deep); width: 15px; height: 15px; }
+
+.comp.is-locked .comp-controls,
+.comp.is-locked .comp-detector { opacity: 0.5; pointer-events: none; }
+
+@media (max-width: 760px) {
+  /* The curve and the trace stack; the meters stay beside them, because a
+     meter lying on its side is not a meter. */
+  .comp-display {
+    grid-template-columns: 1fr 46px;
+    grid-template-areas: "curve meters" "trace meters";
+    height: clamp(240px, 46vh, 340px);
+  }
+  .comp-panel-curve { grid-area: curve; }
+  .comp-panel-trace { grid-area: trace; }
+  .comp-panel-meters { grid-area: meters; }
+  .comp-controls { grid-template-columns: 1fr 1fr; }
+}
+
 /* --- controls you dial ---------------------------------------------------- */
 /* The production half of the app: the same control you would reach for in a
    session, with the same units written on it, and audible before you commit.

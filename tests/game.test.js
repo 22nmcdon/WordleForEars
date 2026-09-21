@@ -110,7 +110,7 @@ test('a mode\'s settings fill themselves in, and refuse what it does not offer',
   assert.deepEqual(settingsFor('eq', {}), { exercise: 'match' });
   assert.deepEqual(settingsFor('eq', { exercise: 'fix' }), { exercise: 'fix' });
   assert.deepEqual(settingsFor('eq', { exercise: 'nonsense' }), { exercise: 'match' });
-  assert.deepEqual(settingsFor('compression', {}), { exercise: 'match', source: 'drums' });
+  assert.deepEqual(settingsFor('compression', {}), { exercise: 'match' });
   assert.deepEqual(settingsFor('rhythm', {}), { tempo: '84' });
 });
 

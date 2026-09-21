@@ -22,6 +22,7 @@ const MODULES = [
   'theory.js', 'random.js', 'engrave.js',
   'audio.js',
   'eq/filters.js', 'eq/spectrum.js', 'eq/player.js', 'eq/plugin.js',
+  'comp/dsp.js', 'comp/node.js', 'comp/player.js', 'comp/plugin.js',
   'modes/scoring.js',
   'modes/chords.js', 'modes/pitch.js', 'modes/intervals.js', 'modes/eq.js',
   'modes/rhythm.js', 'modes/panning.js', 'modes/compression.js',
@@ -152,7 +153,14 @@ const script = `<script type="module">\n(function () {\n${code.join('\n\n')}\n}(
 
 // No <!doctype>, <html>, <head> or <body>: an artifact is wrapped in its own
 // skeleton at publish time, and a second one nested inside it is not a page.
-const bundle = `<title>${title}</title>
+//
+// The charset is the exception, and it has to come first. Published, the
+// wrapper declares one and this is ignored; opened as a file, or served by
+// anything that does not name a charset in the header, nothing declares one
+// at all and the browser falls back to Latin-1 - which turned every em dash
+// and middle dot in the page into a pair of accented letters.
+const bundle = `<meta charset="utf-8">
+<title>${title}</title>
 ${fonts}
 <style>
 ${styles.trim()}

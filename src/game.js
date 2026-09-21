@@ -25,9 +25,16 @@ export function combinationsFor(mode, tier) {
   }, 1);
 }
 
-/** Read a guess against the answer, through the mode that asked the question. */
+/**
+ * Read a guess against the answer, through the mode that asked the question.
+ *
+ * The whole puzzle goes along with the answer, because a mode may need more
+ * than the answer to read a guess: a compressor is not a curve you can work
+ * out on paper, so that mode marks by running both settings over the same
+ * audio, and the audio is on the puzzle.
+ */
 export function scoreGuess(guess, puzzle) {
-  return modeOf(puzzle.mode).score(guess, puzzle.answer, puzzle.tier);
+  return modeOf(puzzle.mode).score(guess, puzzle.answer, puzzle.tier, puzzle);
 }
 
 /** Whatever the mode's settings are set to, filled in from their defaults. */

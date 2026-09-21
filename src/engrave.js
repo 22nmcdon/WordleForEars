@@ -9,6 +9,29 @@
 const FLAT = '♭';
 const SHARP = '♯';
 
+/**
+ * Is the character at @p i an accidental, or just a letter?
+ *
+ * A proper ♭ or ♯ always is. An ASCII b or # only is when it is hanging off a
+ * note name or a figure and no word continues past it - "Bb", "7b9", "m7b5"
+ * yes; "beats", "back", "thumb" no. Reading every b as a flat was fine while
+ * the only things engraved were chord symbols, and stopped being fine the
+ * moment a mode wrote a sentence: the compressor reported that a duck "never
+ * comes ♭ack up", and a rhythm two beats out was "2 ♭eats".
+ */
+function isAccidental(text, i) {
+  const character = text[i];
+  if (character === FLAT || character === SHARP) return true;
+  if (character !== 'b' && character !== '#') return false;
+
+  // A letter after it means a word is carrying on through it.
+  if (/[A-Za-z]/.test(text[i + 1] ?? '')) return false;
+
+  // And it has to be attached to something an accidental can belong to.
+  const before = text[i - 1] ?? '';
+  return before === '' || /[A-G0-9]/.test(before);
+}
+
 /** Appends @p text to @p parent, with accidentals in their own serif span. */
 function writeWithAccidentals(parent, text) {
   let run = '';
@@ -18,8 +41,10 @@ function writeWithAccidentals(parent, text) {
     run = '';
   };
 
-  for (const character of text) {
-    if (character === FLAT || character === SHARP || character === 'b' || character === '#') {
+  for (let i = 0; i < text.length; i += 1) {
+    const character = text[i];
+
+    if (isAccidental(text, i)) {
       flush();
       const accidental = document.createElement('span');
       accidental.className = 'acc';
