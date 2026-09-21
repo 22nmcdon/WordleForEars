@@ -2,16 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  QUALITIES, TIERS, chordPitchClasses, chordName, voiceChord,
+  QUALITIES, TIERS, shapeOf, chordName, chordPitchClasses, voiceChord,
 } from '../src/theory.js';
 import {
-  HIT, NEAR, MISS, MAX_GUESSES, scoreGuess, notesState,
+  HIT, NEAR, MISS, MAX_GUESSES, guessesFor, scoreGuess, notesState,
   createGame, submitGuess, makePuzzle, dailySeed,
 } from '../src/game.js';
 import { mulberry32, hashSeed, puzzleNumber, dayKey } from '../src/random.js';
 import { shareText } from '../src/share.js';
 
-const C = 0; const E = 4; const G = 7; const A = 9;
+const at = (root, quality) => ({ root, quality });
 
 test('every quality starts on the root and has unique intervals', () => {
   for (const [id, q] of Object.entries(QUALITIES)) {
@@ -21,81 +21,98 @@ test('every quality starts on the root and has unique intervals', () => {
   }
 });
 
-test('tiers only reference qualities that exist', () => {
+test('tiers only reference qualities that exist, and each allows some guesses', () => {
   for (const tier of Object.values(TIERS)) {
     for (const q of tier.qualities) assert.ok(QUALITIES[q], `unknown quality ${q}`);
+    assert.ok(tier.guesses >= 3 && tier.guesses < tier.qualities.length,
+      'a tier you can work through by pressing every button is not an ear test');
   }
 });
 
-test('exact guess scores green across the board', () => {
-  const s = scoreGuess({ root: C, quality: 'major' }, { root: C, quality: 'major' });
-  assert.equal(s.root, HIT);
-  assert.equal(s.quality, HIT);
-  assert.deepEqual(s.notes, { matched: 3, total: 3 });
-  assert.ok(s.correct);
+test('a chord shape is what sits above the root, folded into an octave', () => {
+  assert.deepEqual(shapeOf('major'), new Set([4, 7]));
+  assert.deepEqual(shapeOf('halfDim7'), new Set([3, 6, 10]));
+  // A 9th is a 2nd and a 13th is a 6th, to the ear the chord is played with.
+  assert.deepEqual(shapeOf('dom9'), new Set([2, 4, 7, 10]));
+  assert.deepEqual(shapeOf('dom13'), new Set([2, 4, 7, 9, 10]));
 });
 
-test('a note that is in the chord but not its root scores yellow', () => {
-  // C major (C E G) guessed against A minor (A C E): C is present, not the root.
-  const s = scoreGuess({ root: C, quality: 'major' }, { root: A, quality: 'minor' });
-  assert.equal(s.root, NEAR);
-  assert.equal(s.notes.matched, 2);
+test('naming the chord being played scores green, whatever its root', () => {
+  for (const root of [0, 5, 11]) {
+    const s = scoreGuess({ quality: 'minor' }, at(root, 'minor'));
+    assert.equal(s.quality, HIT);
+    assert.deepEqual(s.notes, { matched: 2, total: 2 });
+    assert.ok(s.correct);
+  }
+});
+
+test('the root is not part of the reading', () => {
+  // The same guess against the same quality on a different root reads the same:
+  // this mode asks what the chord is, never what note it starts on.
+  const low = scoreGuess({ quality: 'major' }, at(0, 'minor'));
+  const high = scoreGuess({ quality: 'major' }, at(7, 'minor'));
+  assert.deepEqual(low, high);
+});
+
+test('a chord sharing a note above the root scores gold', () => {
+  // Major and minor share the fifth and nothing else.
+  const s = scoreGuess({ quality: 'major' }, at(0, 'minor'));
+  assert.equal(s.quality, NEAR);
+  assert.deepEqual(s.notes, { matched: 1, total: 2 });
   assert.ok(!s.correct);
 });
 
-test('a root outside the chord scores grey', () => {
-  const s = scoreGuess({ root: 1, quality: 'major' }, { root: C, quality: 'major' });
-  assert.equal(s.root, MISS);
+test('a chord sharing nothing above the root scores rust', () => {
+  // Augmented is 4 and 8; diminished is 3 and 6.
+  const s = scoreGuess({ quality: 'augmented' }, at(0, 'diminished'));
+  assert.equal(s.quality, MISS);
+  assert.deepEqual(s.notes, { matched: 0, total: 2 });
 });
 
-test('qualities sharing an interval score yellow, unrelated ones grey', () => {
-  const near = scoreGuess({ root: C, quality: 'major' }, { root: C, quality: 'minor' });
-  assert.equal(near.quality, NEAR, 'major and minor share the fifth');
-
-  const far = scoreGuess({ root: C, quality: 'augmented' }, { root: C, quality: 'diminished' });
-  assert.equal(far.quality, MISS, 'augmented and diminished share nothing above the root');
-});
-
-test('note proximity counts the answer notes the guess contains', () => {
-  // C major (C E G) vs E minor (E G B): shares E and G.
-  const s = scoreGuess({ root: C, quality: 'major' }, { root: E, quality: 'minor' });
+test('the note count is what narrows the next guess', () => {
+  // m7b5 is 3, 6, 10; m7 is 3, 7, 10 - the third and the seventh, not the fifth.
+  const s = scoreGuess({ quality: 'min7' }, at(2, 'halfDim7'));
   assert.deepEqual(s.notes, { matched: 2, total: 3 });
   assert.equal(notesState(s.notes), NEAR);
-  assert.equal(notesState({ matched: 0, total: 3 }), MISS);
   assert.equal(notesState({ matched: 3, total: 3 }), HIT);
+  assert.equal(notesState({ matched: 0, total: 3 }), MISS);
 });
 
 test('a correct guess wins and stops accepting input', () => {
-  const puzzle = { answer: { root: G, quality: 'sus4' }, tier: 'easy', voicing: 'root', spin: 0, octave: 4, seed: 't' };
+  const puzzle = makePuzzle({ tier: 'easy', seed: 'win' });
   let game = createGame(puzzle);
-  game = submitGuess(game, { root: C, quality: 'major' });
-  assert.equal(game.status, 'playing');
-  game = submitGuess(game, { root: G, quality: 'sus4' });
-  assert.equal(game.status, 'won');
-  assert.equal(game.guesses.length, 2);
+  const wrong = TIERS.easy.qualities.find((q) => q !== puzzle.answer.quality);
 
-  const after = submitGuess(game, { root: C, quality: 'minor' });
+  game = submitGuess(game, { quality: wrong });
+  assert.equal(game.status, 'playing');
+  game = submitGuess(game, { quality: puzzle.answer.quality });
+  assert.equal(game.status, 'won');
+
+  const after = submitGuess(game, { quality: wrong });
   assert.equal(after.guesses.length, 2, 'no guesses accepted after the game ends');
 });
 
-test('six wrong guesses lose the game', () => {
-  const puzzle = { answer: { root: 11, quality: 'diminished' }, tier: 'easy', voicing: 'root', spin: 0, octave: 4, seed: 't' };
-  let game = createGame(puzzle);
-  const wrong = [
-    { root: C, quality: 'major' }, { root: 1, quality: 'major' },
-    { root: 2, quality: 'major' }, { root: 3, quality: 'major' },
-    { root: 4, quality: 'major' }, { root: 5, quality: 'major' },
-  ];
-  for (const g of wrong) game = submitGuess(game, g);
-  assert.equal(game.guesses.length, MAX_GUESSES);
-  assert.equal(game.status, 'lost');
+test('a tier allows its own number of guesses, and no more', () => {
+  for (const [tier, spec] of Object.entries(TIERS)) {
+    const puzzle = makePuzzle({ tier, seed: `lose-${tier}` });
+    let game = createGame(puzzle);
+    assert.equal(game.allowed, spec.guesses);
+    assert.equal(guessesFor(tier), spec.guesses);
+
+    const wrong = spec.qualities.filter((q) => q !== puzzle.answer.quality);
+    for (const quality of wrong.slice(0, spec.guesses)) game = submitGuess(game, { quality });
+
+    assert.equal(game.guesses.length, spec.guesses);
+    assert.equal(game.status, 'lost');
+  }
+  assert.equal(MAX_GUESSES, 4, 'a stats bucket has to hold the longest tier');
 });
 
 test('repeating a guess is rejected without burning a turn', () => {
   const puzzle = makePuzzle({ tier: 'easy', seed: 'x' });
-  let game = createGame(puzzle);
-  game = submitGuess(game, { root: C, quality: 'major' });
-  const repeat = submitGuess(game, { root: C, quality: 'major' });
+  const wrong = TIERS.easy.qualities.find((q) => q !== puzzle.answer.quality);
+  let game = submitGuess(createGame(puzzle), { quality: wrong });
+  const repeat = submitGuess(game, { quality: wrong });
   assert.equal(repeat.guesses.length, 1);
   assert.match(repeat.error, /already/i);
 });
@@ -115,13 +132,16 @@ test('the daily puzzle is identical for the same UTC day and differs across days
   assert.equal(puzzleNumber(nextDay) - puzzleNumber(day), 1);
 });
 
-test('generated puzzles stay inside their tier', () => {
+test('generated puzzles stay inside their tier and move their root about', () => {
   for (const [tier, spec] of Object.entries(TIERS)) {
+    const roots = new Set();
     for (let i = 0; i < 200; i += 1) {
       const { answer } = makePuzzle({ tier, seed: `seed-${tier}-${i}` });
       assert.ok(spec.qualities.includes(answer.quality), `${answer.quality} not in ${tier}`);
       assert.ok(answer.root >= 0 && answer.root < 12);
+      roots.add(answer.root);
     }
+    assert.equal(roots.size, 12, 'nothing to anchor on: the root moves every puzzle');
   }
 });
 
@@ -135,20 +155,16 @@ test('the seeded PRNG is deterministic and stays in range', () => {
   }
 });
 
-test('puzzle generation spreads across roots and qualities', () => {
-  const roots = new Set();
+test('puzzle generation spreads across a tier', () => {
   const qualities = new Set();
   for (let i = 0; i < 400; i += 1) {
-    const { answer } = makePuzzle({ tier: 'easy', seed: `spread-${i}` });
-    roots.add(answer.root);
-    qualities.add(answer.quality);
+    qualities.add(makePuzzle({ tier: 'easy', seed: `spread-${i}` }).answer.quality);
   }
-  assert.equal(roots.size, 12);
   assert.equal(qualities.size, TIERS.easy.qualities.length);
 });
 
 test('voicings keep the chord notes but change the arrangement', () => {
-  const chord = { root: C, quality: 'dom7' };
+  const chord = { root: 0, quality: 'dom7' };
   const expected = chordPitchClasses(chord);
   for (const voicing of ['root', 'inversion', 'open']) {
     const notes = voiceChord(chord, voicing, 4, 1);
@@ -160,21 +176,22 @@ test('voicings keep the chord notes but change the arrangement', () => {
 });
 
 test('chord names read the way players say them', () => {
-  assert.equal(chordName({ root: C, quality: 'major' }), 'C major');
-  assert.equal(chordName({ root: A, quality: 'min7' }), 'A m7');
+  assert.equal(chordName({ root: 0, quality: 'major' }), 'C major');
+  assert.equal(chordName({ root: 9, quality: 'min7' }), 'A m7');
   assert.equal(chordName({ root: 10, quality: 'halfDim7' }), 'A♯/B♭ m7♭5');
 });
 
-test('the share grid has one emoji row per guess and hides the answer', () => {
-  const puzzle = { answer: { root: A, quality: 'minor' }, tier: 'easy', voicing: 'root', spin: 0, octave: 4, seed: 's' };
-  let game = createGame(puzzle, { mode: 'daily', date: new Date('2026-09-21T10:00:00Z') });
-  game = submitGuess(game, { root: C, quality: 'major' });
-  game = submitGuess(game, { root: A, quality: 'minor' });
+test('the share grid has one row per guess and hides the answer', () => {
+  const puzzle = makePuzzle({ tier: 'easy', seed: 'share' });
+  const wrong = TIERS.easy.qualities.find((q) => scoreGuess({ quality: q }, puzzle.answer).quality === MISS);
 
-  const text = shareText(game);
-  const lines = text.split('\n');
-  assert.match(lines[0], /Harmonle #\d+ · Chords Easy 2\/6/);
-  assert.equal(lines[2], '🟨🟨🟨');
-  assert.equal(lines[3], '🟩🟩🟩');
-  assert.ok(!/minor/i.test(text), 'the grid must not leak the answer');
+  let game = createGame(puzzle, { mode: 'daily', date: new Date('2026-09-21T10:00:00Z') });
+  game = submitGuess(game, { quality: wrong });
+  game = submitGuess(game, { quality: puzzle.answer.quality });
+
+  const lines = shareText(game).split('\n');
+  assert.match(lines[0], /Harmonle #\d+ · Chords Easy 2\/3/);
+  assert.equal(lines[2], '⬜⬜');
+  assert.equal(lines[3], '🟩🟩');
+  assert.ok(!lines.join(' ').includes(puzzle.answer.quality), 'the grid must not leak the answer');
 });

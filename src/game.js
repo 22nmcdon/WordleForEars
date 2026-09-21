@@ -1,51 +1,46 @@
-import {
-  QUALITIES, TIERS, chordPitchClasses, chordName, rootLabel, qualityLabel,
-} from './theory.js';
+import { TIERS, shapeOf, chordName, qualityLabel } from './theory.js';
 import { mulberry32, hashSeed, dayKey, puzzleNumber } from './random.js';
 
-export const MAX_GUESSES = 6;
+/** The most guesses any tier allows - what a stats bucket has to make room for. */
+export const MAX_GUESSES = Math.max(...Object.values(TIERS).map((t) => t.guesses));
+
+export const guessesFor = (tier) => TIERS[tier].guesses;
 
 /** Feedback states, borrowed from Wordle. */
-export const HIT = 'hit'; // green  — right component, right slot
-export const NEAR = 'near'; // yellow — right component, wrong slot / near miss
-export const MISS = 'miss'; // gray   — not in the chord at all
+export const HIT = 'hit'; // sage - the quality being played
+export const NEAR = 'near'; // gold - shares structure with it
+export const MISS = 'miss'; // rust - shares nothing above the root
 
 /**
  * Score one guess against the answer.
  *
- *  root    — hit when the roots match; near when the guessed root is a note of
- *            the answer but not its root; miss otherwise.
- *  quality — hit when identical; near when the two qualities share at least one
- *            interval above the root (a structural near miss); miss otherwise.
- *  notes   — how many of the answer's pitch classes the guessed chord actually
- *            contains, as proximity feedback on the guess as a whole.
+ * The chord's root is not part of this: naming the root by ear is absolute
+ * pitch, which is a different skill and gets its own mode. What is being asked
+ * here is what the chord *is* - major, minor, half-diminished - so the puzzle
+ * is rooted wherever the seed put it and every reading below is made from the
+ * shape above that root.
+ *
+ *  quality — hit when it is the chord being played; near when it shares a note
+ *            above the root with it; miss when it shares nothing.
+ *  notes   — how many of the answer's notes above the root your chord has,
+ *            which is the proximity reading: "2/3" is a guess with the right
+ *            third and fifth and the wrong seventh.
  */
 export function scoreGuess(guess, answer) {
-  const answerNotes = chordPitchClasses(answer);
-  const guessNotes = chordPitchClasses(guess);
-
-  let root = MISS;
-  if (guess.root === answer.root) root = HIT;
-  else if (answerNotes.has(guess.root % 12)) root = NEAR;
-
-  let quality = MISS;
-  if (guess.quality === answer.quality) {
-    quality = HIT;
-  } else {
-    const answerShape = new Set(QUALITIES[answer.quality].intervals);
-    const shared = QUALITIES[guess.quality].intervals
-      .filter((i) => i !== 0 && answerShape.has(i));
-    if (shared.length > 0) quality = NEAR;
-  }
+  const answerShape = shapeOf(answer.quality);
+  const guessShape = shapeOf(guess.quality);
 
   let matched = 0;
-  for (const pc of answerNotes) if (guessNotes.has(pc)) matched += 1;
+  for (const note of answerShape) if (guessShape.has(note)) matched += 1;
+
+  let quality = MISS;
+  if (guess.quality === answer.quality) quality = HIT;
+  else if (matched > 0) quality = NEAR;
 
   return {
-    root,
     quality,
-    notes: { matched, total: answerNotes.size },
-    correct: root === HIT && quality === HIT,
+    notes: { matched, total: answerShape.size },
+    correct: quality === HIT,
   };
 }
 
@@ -59,6 +54,8 @@ export function notesState({ matched, total }) {
 export function makePuzzle({ tier = 'easy', voicing = 'root', seed }) {
   const rng = mulberry32(hashSeed(seed));
   const qualities = TIERS[tier].qualities;
+  // The root is for sounding the chord, never for guessing - and it moves every
+  // puzzle, so nobody can anchor on "the daily is always in C".
   const root = Math.floor(rng() * 12);
   const quality = qualities[Math.floor(rng() * qualities.length)];
   const spin = Math.floor(rng() * 3);
@@ -79,6 +76,7 @@ export function createGame(puzzle, { mode = 'practice', date = new Date() } = {}
   return {
     puzzle,
     mode,
+    allowed: guessesFor(puzzle.tier),
     number: mode === 'daily' ? puzzleNumber(date) : null,
     guesses: [],
     status: 'playing', // 'playing' | 'won' | 'lost'
@@ -89,24 +87,23 @@ export function createGame(puzzle, { mode = 'practice', date = new Date() } = {}
 export function submitGuess(game, guess) {
   if (game.status !== 'playing') return game;
 
-  const already = game.guesses.some(
-    (g) => g.guess.root === guess.root && g.guess.quality === guess.quality,
-  );
-  if (already) return { ...game, error: 'You already tried that chord.' };
+  const already = game.guesses.some((g) => g.guess.quality === guess.quality);
+  if (already) return { ...game, error: 'You already tried that one.' };
 
   const score = scoreGuess(guess, game.puzzle.answer);
   const guesses = [...game.guesses, { guess, score }];
   let status = 'playing';
   if (score.correct) status = 'won';
-  else if (guesses.length >= MAX_GUESSES) status = 'lost';
+  else if (guesses.length >= game.allowed) status = 'lost';
 
   return { ...game, guesses, status, error: null };
 }
 
+/** The chord as it would be written on a chart, root and all. */
 export function answerName(game) {
   return chordName(game.puzzle.answer);
 }
 
 export function guessName(guess) {
-  return `${rootLabel(guess.root)} ${qualityLabel(guess.quality)}`;
+  return qualityLabel(guess.quality);
 }

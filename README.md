@@ -1,6 +1,7 @@
 # Harmonle — ear-training Wordle (proof of concept)
 
-Hear a chord, guess its root and quality, get Wordle-style coloured feedback.
+Hear a chord and name what kind of chord it is — major, minor, half-diminished —
+with Wordle-style coloured feedback.
 This is step 1 of [the project plan](#whats-in-this-poc): **Chords mode**, piano,
 no accounts, stats stored locally in the browser.
 
@@ -29,21 +30,26 @@ is rewritten beyond the module keywords, so the bundle reads as the source does.
 
 1. **Play chord** synthesises the clue live (Web Audio, additive piano tone).
    **Arpeggiate** spreads it out; **Reference C** gives you middle C to orient by.
-2. Pick a **root** and a **quality**, then submit. Six guesses.
-3. Each guess scores three cells:
+2. Name the **quality** and submit. Three guesses on Easy, four on Medium and Hard —
+   enough to work it out, not enough to press every button.
+3. Each guess scores two cells:
 
-| Cell | 🟩 Green | 🟨 Yellow | ⬜ Grey |
+| Cell | 🟩 Sage | 🟨 Gold | 🟥 Rust |
 | --- | --- | --- | --- |
-| Root | the right root | the note is *in* the chord but is not its root | not in the chord |
-| Quality | exactly right | shares an interval above the root with the answer | shares nothing |
-| Notes | all of the answer's notes | some of them | none |
+| Quality | that is the chord | shares a note above the root with it | shares nothing |
+| Notes | all of them | some of them | none |
 
-The third cell scores the guess as a whole — `2/3` means your chord contains two
-of the answer's three notes — which is the proximity feedback the plan asks for.
+**The root is not part of it.** Naming the root by ear is absolute pitch, which is a
+different skill and gets its own mode later — so every puzzle is rooted somewhere
+different and there is nothing to anchor on. Every reading is made from the chord's
+*shape*: the pitch classes above the root, folded into an octave, so a 9th and a 2nd
+are the one note they sound like. `2/3` means your chord has two of the three notes
+above the root that the answer has, which is what narrows the next guess: right third,
+wrong seventh.
 
 ## What's in this POC
 
-- **Chords mode** with all three difficulty tiers from the plan: Easy (triads),
+- **Chords mode** — quality only — with all three difficulty tiers from the plan: Easy (triads),
   Medium (6th/7th chords), Hard (extensions and altered dominants). The tier
   table is data, so tiers were nearly free once Easy worked.
 - **Voicing** toggle: root position, inversions, drop-2 open voicings.
@@ -56,6 +62,8 @@ of the answer's three notes — which is the proximity feedback the plan asks fo
 
 ## Not built yet
 
+- **Pitch mode**, which is where naming the root belongs: it is absolute-pitch work,
+  not chord recognition, and mixing the two made every chord round two tests at once.
 - EQ mode, and the intervals / rhythm / panning / compression modes.
 - Guitar and synth-pad timbres — the instrument toggle is present but disabled.
 - Any server, account, or cross-device sync. Stats live in `localStorage`.

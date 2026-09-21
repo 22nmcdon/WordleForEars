@@ -310,10 +310,20 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .plays { font-size: 12px; color: var(--text-soft); margin-left: auto; white-space: nowrap; }
 
 /* --- the board ----------------------------------------------------------- */
+/* Two columns now that the root is not asked for, and capped: a board that
+   ran the width of a desktop sheet left one word floating in a lot of paper. */
 .board-head, .row {
   display: grid;
-  grid-template-columns: 1.1fr 1.3fr 0.6fr;
+  grid-template-columns: 1fr 0.38fr;
   gap: 6px;
+  /* `width` is not redundant beside `max-width`. A flex item with `margin: auto`
+     in the cross axis has those margins absorb the free space instead of
+     stretching, so a row sized itself to its own two words and sat in the
+     middle of the sheet as a pair of stamps. Given a width to start from, the
+     max-width caps it and the auto margins centre it. */
+  width: 100%;
+  max-width: 460px;
+  margin-inline: auto;
 }
 .board-head {
   font-size: 10px;
@@ -381,67 +391,32 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .picker-group + .picker-group { margin-top: 16px; }
 .picker.done { opacity: 0.5; pointer-events: none; }
 
-/* The keyboard: a root is a key, not a word in a list. */
-.keyboard {
-  position: relative;
-  height: 112px;
-  display: flex;
-  border: 1px solid var(--charcoal);
-  background: var(--charcoal);
-  user-select: none;
-  touch-action: manipulation;
-}
-.key { position: relative; border: 0; padding: 0; font: inherit; }
-.key.white { flex: 1 1 0; background: var(--paper); border-right: 1px solid var(--charcoal); }
-.key.white:last-of-type { border-right: 0; }
-.key.black {
-  position: absolute;
-  top: 0;
-  height: 62%;
-  background: var(--charcoal);
-  border: 1px solid var(--charcoal);
-  z-index: 2;
-}
-.key[aria-pressed="true"] { background: var(--blush-deep); border-color: var(--blush-deep); }
-.key .key-name {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  font-weight: 500;
-  pointer-events: none;
-}
-.key.white .key-name { bottom: 8px; color: var(--text-soft); }
-.key.black .key-name { bottom: 6px; color: var(--cream); font-size: 9px; }
-.key[aria-pressed="true"] .key-name { color: var(--paper); }
-
 /* Qualities: the symbol as a player would write it, with its name underneath. */
 .qualities {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 10px;
 }
 .quality {
   background: none;
   border: 1px solid var(--line);
   border-radius: 20px;
-  padding: 7px 8px 8px;
+  padding: 11px 10px 12px;
   text-align: center;
-  min-height: 52px;
+  min-height: 64px;
 }
 .quality:hover { border-color: var(--blush); }
 .quality .symbol {
   display: block;
   font-family: var(--hand);
   font-weight: 700;
-  font-size: 19px;
+  font-size: 23px;
   line-height: 1.15;
   color: var(--charcoal);
 }
 .quality .name {
   display: block;
-  font-size: 9px;
+  font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-weight: 500;
@@ -626,9 +601,8 @@ dialog::backdrop { background: rgba(36, 31, 29, 0.45); }
   .top-bar-right { justify-content: center; }
   .setup { justify-content: center; }
   .plays { margin-left: 0; width: 100%; }
-  .keyboard { height: 96px; }
   .cell { min-height: 46px; }
-  .qualities { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+  .qualities { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
   .dock-foot .submit-btn { margin-left: 0; width: 100%; }
 
   dialog {

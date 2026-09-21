@@ -11,24 +11,28 @@ globalThis.localStorage = {
 };
 
 const { getStats, recordGame, dailyResult, weakestQuality, resetStats } = await import('../src/stats.js');
-const { createGame, submitGuess, makePuzzle } = await import('../src/game.js');
+const { createGame, submitGuess, makePuzzle, MAX_GUESSES } = await import('../src/game.js');
+const { TIERS } = await import('../src/theory.js');
 
-function play(puzzle, guesses, mode = 'practice') {
+const puzzleFor = (quality, seed = 's') => (
+  { answer: { root: 0, quality }, tier: 'easy', voicing: 'root', spin: 0, octave: 4, seed }
+);
+
+function play(puzzle, qualities, mode = 'practice') {
   let game = createGame(puzzle, { mode });
-  for (const g of guesses) game = submitGuess(game, g);
+  for (const quality of qualities) game = submitGuess(game, { quality });
   recordGame(game);
   return game;
 }
 
-const puzzleFor = (answer, seed = 's') => (
-  { answer, tier: 'easy', voicing: 'root', spin: 0, octave: 4, seed }
-);
+/** Three qualities that are not the answer - enough to lose an Easy round. */
+const wrongFor = (quality) => TIERS.easy.qualities.filter((q) => q !== quality).slice(0, 3);
 
 test.beforeEach(() => resetStats());
 
 test('a win records a streak and lands in the right distribution bucket', () => {
-  const answer = { root: 0, quality: 'major' };
-  play(puzzleFor(answer), [{ root: 5, quality: 'minor' }, answer]);
+  play(puzzleFor('major'), ['minor', 'major']);
+
   const stats = getStats('practice', 'easy');
   assert.equal(stats.played, 1);
   assert.equal(stats.won, 1);
@@ -38,10 +42,8 @@ test('a win records a streak and lands in the right distribution bucket', () => 
 });
 
 test('a loss breaks the streak but keeps the best', () => {
-  const answer = { root: 0, quality: 'major' };
-  play(puzzleFor(answer), [answer]);
-  const wrong = Array.from({ length: 6 }, (_, i) => ({ root: i + 1, quality: 'sus2' }));
-  play(puzzleFor({ root: 0, quality: 'diminished' }, 's2'), wrong);
+  play(puzzleFor('major'), ['major']);
+  play(puzzleFor('diminished', 's2'), wrongFor('diminished'));
 
   const stats = getStats('practice', 'easy');
   assert.equal(stats.played, 2);
@@ -51,24 +53,21 @@ test('a loss breaks the streak but keeps the best', () => {
 });
 
 test('a finished daily is stored so it cannot be replayed', () => {
-  const answer = { root: 7, quality: 'sus4' };
-  const puzzle = puzzleFor(answer, 'daily:easy:2026-09-21');
+  const puzzle = puzzleFor('sus4', 'daily:easy:2026-09-21');
   assert.equal(dailyResult(puzzle), null);
-  play(puzzle, [{ root: 0, quality: 'major' }, answer], 'daily');
+  play(puzzle, ['major', 'sus4'], 'daily');
 
   const saved = dailyResult(puzzle);
   assert.equal(saved.status, 'won');
-  assert.deepEqual(saved.guesses, [{ root: 0, quality: 'major' }, answer]);
-  assert.equal(dailyResult(puzzleFor(answer, 'daily:easy:2026-09-22')), null);
+  assert.deepEqual(saved.guesses, [{ quality: 'major' }, { quality: 'sus4' }]);
+  assert.equal(dailyResult(puzzleFor('sus4', 'daily:easy:2026-09-22')), null);
 });
 
 test('the weak-spot hint waits for enough data, then names the worst quality', () => {
-  const dim = { root: 0, quality: 'diminished' };
-  const wrong = Array.from({ length: 6 }, (_, i) => ({ root: i + 1, quality: 'sus2' }));
   assert.equal(weakestQuality(getStats('practice', 'easy')), null, 'no hint from one game');
 
-  for (let i = 0; i < 3; i += 1) play(puzzleFor(dim, `d${i}`), wrong);
-  play(puzzleFor({ root: 2, quality: 'major' }, 'm1'), [{ root: 2, quality: 'major' }]);
+  for (let i = 0; i < 3; i += 1) play(puzzleFor('diminished', `d${i}`), wrongFor('diminished'));
+  play(puzzleFor('major', 'm1'), ['major']);
 
   const weak = weakestQuality(getStats('practice', 'easy'));
   assert.equal(weak.quality, 'diminished');
@@ -78,12 +77,18 @@ test('the weak-spot hint waits for enough data, then names the worst quality', (
 
 test('unfinished games are not recorded', () => {
   const puzzle = makePuzzle({ tier: 'easy', seed: 'unfinished' });
-  const game = submitGuess(createGame(puzzle), { root: 0, quality: 'major' });
-  recordGame(game);
+  const wrong = TIERS.easy.qualities.find((q) => q !== puzzle.answer.quality);
+  recordGame(submitGuess(createGame(puzzle), { quality: wrong }));
   assert.equal(getStats('practice', 'easy').played, 0);
+});
+
+test('a bucket makes room for the longest tier', () => {
+  assert.equal(getStats('practice', 'easy').distribution.length, MAX_GUESSES);
 });
 
 test('corrupt storage degrades to empty stats instead of throwing', () => {
   localStorage.setItem('harmonle.stats.v1', '{not json');
-  assert.deepEqual(getStats('practice', 'easy').distribution, [0, 0, 0, 0, 0, 0]);
+  const stats = getStats('practice', 'easy');
+  assert.equal(stats.played, 0);
+  assert.deepEqual(stats.distribution, new Array(MAX_GUESSES).fill(0));
 });

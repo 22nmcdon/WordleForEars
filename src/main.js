@@ -1,9 +1,9 @@
 import {
-  QUALITIES, TIERS, VOICINGS, ROOT_LABELS,
-  voiceChord, chordName, qualityLabel, rootLabel,
+  QUALITIES, TIERS, VOICINGS,
+  voiceChord, qualityLabel, rootLabel,
 } from './theory.js';
 import {
-  MAX_GUESSES, notesState,
+  guessesFor, notesState,
   createGame, submitGuess, makePuzzle, dailySeed, practiceSeed,
 } from './game.js';
 import { PianoEngine } from './audio.js';
@@ -31,7 +31,6 @@ const ui = {
   mode: 'daily',
   tier: 'easy',
   voicing: 'root',
-  root: null,
   quality: null,
   game: null,
   plays: 0,
@@ -51,45 +50,6 @@ function fillSelects() {
     .join('');
   $('#tier').value = ui.tier;
   $('#voicing').value = ui.voicing;
-}
-
-/** The roots, as one octave of keys - a root is a key, not a word in a list. */
-function buildKeyboard() {
-  const keyboard = $('#roots');
-  keyboard.textContent = '';
-
-  const whites = [];
-  const blacks = [];
-  for (let pc = 0; pc < 12; pc += 1) {
-    (ROOT_LABELS[pc].includes('/') ? blacks : whites).push(pc);
-  }
-
-  const whiteWidth = 100 / whites.length;
-  const key = (pc, black) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `key ${black ? 'black' : 'white'}`;
-    button.dataset.root = String(pc);
-    button.setAttribute('aria-pressed', 'false');
-    button.setAttribute('aria-label', ROOT_LABELS[pc].replace('/', ' or '));
-    button.title = ROOT_LABELS[pc];
-
-    const name = document.createElement('span');
-    name.className = 'key-name';
-    // A black key has room for one spelling; the chart writes both.
-    engraveNote(name, black ? ROOT_LABELS[pc].split('/')[0] : ROOT_LABELS[pc]);
-    button.appendChild(name);
-    return button;
-  };
-
-  whites.forEach((pc) => keyboard.appendChild(key(pc, false)));
-  blacks.forEach((pc) => {
-    const button = key(pc, true);
-    const whitesBelow = whites.filter((white) => white < pc).length;
-    button.style.width = `${whiteWidth * 0.6}%`;
-    button.style.left = `calc(${whitesBelow * whiteWidth}% - ${whiteWidth * 0.3}%)`;
-    keyboard.appendChild(button);
-  });
 }
 
 /** The qualities, written the way a player writes them: the symbol, then its name. */
@@ -120,18 +80,13 @@ function buildQualities() {
 }
 
 function syncPicker() {
-  for (const el of document.querySelectorAll('[data-root]')) {
-    el.setAttribute('aria-pressed', Number(el.dataset.root) === ui.root ? 'true' : 'false');
-  }
   for (const el of document.querySelectorAll('[data-quality]')) {
     el.setAttribute('aria-pressed', el.dataset.quality === ui.quality ? 'true' : 'false');
   }
 
-  const ready = ui.root !== null && ui.quality !== null && ui.game.status === 'playing';
+  const ready = ui.quality !== null && ui.game.status === 'playing';
   $('#submit').disabled = !ready;
-  $('#submit').textContent = ready
-    ? `Guess ${chordName({ root: ui.root, quality: ui.quality })}`
-    : 'Submit guess';
+  $('#submit').textContent = ready ? `Guess ${qualityLabel(ui.quality)}` : 'Submit guess';
 }
 
 /* ---------- lifecycle ---------- */
@@ -145,7 +100,6 @@ function startGame({ fresh = false } = {}) {
   ui.game = createGame(puzzle, { mode: ui.mode });
   ui.plays = 0;
   $('#plays').textContent = '';
-  ui.root = null;
   ui.quality = null;
   buildQualities();
 
@@ -181,10 +135,10 @@ function playChord({ arpeggio = false } = {}) {
 }
 
 function onSubmit() {
-  if (ui.root === null || ui.quality === null) return;
+  if (ui.quality === null) return;
 
   const before = ui.game;
-  const next = submitGuess(before, { root: ui.root, quality: ui.quality });
+  const next = submitGuess(before, { quality: ui.quality });
   ui.game = next;
 
   if (next.error) {
@@ -193,14 +147,13 @@ function onSubmit() {
   }
   if (next.guesses.length === before.guesses.length) return;
 
-  ui.root = null;
   ui.quality = null;
 
   if (next.status !== 'playing') {
     recordGame(next);
     finish(next);
   } else {
-    const left = MAX_GUESSES - next.guesses.length;
+    const left = next.allowed - next.guesses.length;
     say(`${left} ${left === 1 ? 'guess' : 'guesses'} left.`);
   }
   render();
@@ -248,25 +201,24 @@ function render() {
   const board = $('#board');
   board.textContent = '';
 
-  for (let i = 0; i < MAX_GUESSES; i += 1) {
+  for (let i = 0; i < game.allowed; i += 1) {
     const row = document.createElement('div');
     row.className = 'row';
 
     const played = game.guesses[i];
     if (!played) {
       row.classList.add('empty');
-      row.append(cell('blank'), cell('blank'), cell('blank'));
+      row.append(cell('blank'), cell('blank'));
       board.appendChild(row);
       continue;
     }
 
     const { guess, score } = played;
     row.setAttribute('aria-label',
-      `${chordName(guess)}: root ${score.root}, quality ${score.quality}, `
-      + `${score.notes.matched} of ${score.notes.total} notes`);
+      `${qualityLabel(guess.quality)}: ${score.quality}, `
+      + `${score.notes.matched} of ${score.notes.total} notes above the root`);
 
     row.append(
-      cell(score.root, (node) => engraveNote(node, rootLabel(guess.root))),
       cell(score.quality, (node) => {
         const symbol = document.createElement('span');
         symbol.className = 'symbol';
@@ -314,8 +266,11 @@ function showStats() {
     ['Best', stats.maxStreak],
   ].map(([label, value]) => `<div><strong>${value}</strong><span>${label}</span></div>`).join('');
 
-  const max = Math.max(1, ...stats.distribution);
-  $('#stats-dist').innerHTML = stats.distribution.map((count, i) => {
+  // Only the rows this tier can reach: a bucket makes room for the longest
+  // tier, and a fourth row under Easy is a row nobody can ever fill.
+  const rows = stats.distribution.slice(0, guessesFor(ui.tier));
+  const max = Math.max(1, ...rows);
+  $('#stats-dist').innerHTML = rows.map((count, i) => {
     const width = Math.max(7, Math.round((count / max) * 100));
     return `<div class="dist-row"><span>${i + 1}</span>`
       + `<div class="bar" style="width:${width}%">${count}</div></div>`;
@@ -360,12 +315,6 @@ function wire() {
     ui.game.puzzle.voicing = ui.voicing;
   });
 
-  $('#roots').addEventListener('click', (e) => {
-    const key = e.target.closest('[data-root]');
-    if (!key) return;
-    ui.root = Number(key.dataset.root);
-    syncPicker();
-  });
   $('#qualities').addEventListener('click', (e) => {
     const chip = e.target.closest('[data-quality]');
     if (!chip) return;
@@ -407,7 +356,6 @@ function wire() {
 }
 
 fillSelects();
-buildKeyboard();
 wire();
 startGame();
 

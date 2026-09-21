@@ -59,8 +59,8 @@
 <main class="wrap">
   <section class="sheet-section">
     <div class="sheet">
-      <p class="lede" id="lede">Hear a chord and name what it is — the root, then the quality.
-        Six guesses, and every one of them tells you something.</p>
+      <p class="lede" id="lede">Hear a chord and name what it is — major, minor, half-diminished.
+        Not what note it starts on: what kind of chord it is.</p>
 
       <div class="clue">
         <button class="play-btn" type="button" id="play">Play chord</button>
@@ -69,7 +69,7 @@
         <span class="plays" id="plays"></span>
       </div>
 
-      <div class="board-head"><span>Root</span><span>Quality</span><span>Notes</span></div>
+      <div class="board-head"><span>Quality</span><span>Notes</span></div>
       <div class="board" id="board"></div>
     </div>
   </section>
@@ -86,19 +86,15 @@
 
     <div class="picker" id="picker">
       <div class="picker-group">
-        <p class="eyebrow">Root</p>
-        <div class="keyboard" id="roots" role="group" aria-label="Root"></div>
-      </div>
-      <div class="picker-group">
-        <p class="eyebrow">Quality</p>
-        <div class="qualities" id="qualities" role="group" aria-label="Quality"></div>
+        <p class="eyebrow">What kind of chord is it?</p>
+        <div class="qualities" id="qualities" role="group" aria-label="Chord quality"></div>
       </div>
     </div>
 
     <div class="dock-foot">
-      <span class="legend"><span class="swatch hit"></span> in the chord, in that slot</span>
-      <span class="legend"><span class="swatch near"></span> in the chord, elsewhere</span>
-      <span class="legend"><span class="swatch miss"></span> outside the chord</span>
+      <span class="legend"><span class="swatch hit"></span> that is the chord</span>
+      <span class="legend"><span class="swatch near"></span> shares a note</span>
+      <span class="legend"><span class="swatch miss"></span> shares nothing</span>
       <button class="submit-btn" type="button" id="submit" disabled>Submit guess</button>
     </div>
   </div>
@@ -120,30 +116,35 @@
   </div>
 
   <div class="dialog-body">
-    <p class="help-lede">A chord is played. You name its root and its quality — and each guess
-      says where what you picked actually sits.</p>
+    <p class="help-lede">A chord is played. You name what kind of chord it is — and each guess
+      tells you how close what you named sits to what you heard.</p>
 
     <ul class="help-list">
-      <li><b>Play the chord, then name it.</b>
+      <li><b>Play the chord, then name its quality.</b>
         <span><i>Arpeggiate</i> spreads it out one note at a time; <i>Reference C</i> gives you
         middle C to orient by. Play it as many times as you like.</span></li>
 
-      <li><b><span class="swatch hit"></span>In the chord, in that slot.</b>
-        <span>The root you picked is the chord's root, or the quality is the one being played.</span></li>
+      <li><b>The root is not part of it.</b>
+        <span>Every puzzle is rooted somewhere different, so there is nothing to anchor on.
+        Naming the root by ear is absolute pitch — a different skill, and its own mode later.</span></li>
 
-      <li><b><span class="swatch near"></span>In the chord, somewhere else.</b>
-        <span>The note you picked is in the chord but is not its root; or the quality you picked
-        shares an interval with the one being played.</span></li>
+      <li><b><span class="swatch hit"></span>Sage — that is the chord.</b>
+        <span>The quality you named is the one being played.</span></li>
 
-      <li><b><span class="swatch miss"></span>Outside the chord.</b>
-        <span>Not there at all. Not a mark against you: it is where the note sits.</span></li>
+      <li><b><span class="swatch near"></span>Gold — some of it is right.</b>
+        <span>What you named shares a note above the root with what you heard: the right third
+        and the wrong seventh, say.</span></li>
 
-      <li><b>The third column reads the whole guess.</b>
-        <span><i>2/3</i> means the chord you named contains two of the three notes you heard.</span></li>
+      <li><b><span class="swatch miss"></span>Rust — nothing in common.</b>
+        <span>Not a mark against you: it is how far the two chords sit apart.</span></li>
 
-      <li><b>The daily is the same chord for everyone,</b>
-        <span>seeded from the date. Practice is unlimited, and runs in a cooler light so you
-        always know which one you are in.</span></li>
+      <li><b>The second column counts the notes.</b>
+        <span><i>2/3</i> means your chord has two of the three notes above the root that the
+        answer has — which is what narrows the next guess.</span></li>
+
+      <li><b>Three guesses on Easy, four further up.</b>
+        <span>Enough to work it out, not enough to press every button. The daily is the same
+        chord for everyone; practice is unlimited and runs in a cooler light.</span></li>
 
       <li class="fine">Everything is kept in this browser. No account, no server.</li>
     </ul>
