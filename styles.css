@@ -471,6 +471,21 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   color: var(--charcoal);
   font-variant-numeric: tabular-nums;
 }
+/* What auto gain is doing, and what you have loaded. Quiet: it is a statement
+   of fact about the signal path, not a control. */
+.eq-trim {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
 
 .eq-display {
   position: relative;
@@ -582,6 +597,35 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+
+/* Solo is a state you are in, and a loud one - it silences everything else. */
+.eq-transport .solo-btn {
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  padding: 7px 15px;
+  color: var(--text-soft);
+}
+.eq-transport .solo-btn:hover { border-color: var(--blush); color: var(--blush-deep); }
+.eq-transport .solo-btn.is-on { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
+
+/* Your own material. A filled button, because it is the one thing here that
+   reaches outside the page. */
+.eq-transport .file-btn {
+  display: inline-block;
+  background: var(--charcoal);
+  color: var(--cream);
+  border: 1px solid var(--charcoal);
+  border-radius: 1px;
+  padding: 7px 14px;
+  font-size: 10.5px;
+  line-height: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
+  cursor: pointer;
+}
+.eq-transport .file-btn:hover { background: var(--blush-deep); border-color: var(--blush-deep); }
+.eq-transport .file-btn input { display: none; }
 
 /* The A/B. One of them is on, the way a switch on a desk is. */
 .eq-ab { display: flex; border: 1px solid var(--line); border-radius: 30px; overflow: hidden; }

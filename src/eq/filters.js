@@ -143,6 +143,44 @@ export const shortHz = (hz) =>
 export const writeHz = (hz) =>
   (hz >= 1000 ? `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)} kHz` : `${Math.round(hz)} Hz`);
 
+/**
+ * How much louder a curve makes things, overall - the number auto gain takes
+ * back off.
+ *
+ * Averaged in power rather than in decibels, because loudness is power: a
+ * narrow 12 dB spike is a large number on the display and almost nothing to
+ * the meter, and averaging the decibels would treat it as though it were both.
+ * Spaced logarithmically, which weights every octave equally - near enough to
+ * how music's energy is spread, and much nearer than counting hertz.
+ *
+ * It matters more here than it looks. A boosted curve is a louder curve, and
+ * louder is the oldest false positive in the business: without this, an A/B
+ * against the target rewards whoever boosted more, and the exercise quietly
+ * trains the wrong instinct.
+ */
+export const LIFT_BANDS = 64;
+export const liftFrequencies = () => logFrequencies(LIFT_BANDS, 30, 16000);
+
+export function averageLift(bands, rate = 48000, weights = null) {
+  const frequencies = liftFrequencies();
+  const curve = curveOf(bands, frequencies, rate);
+
+  let lifted = 0;
+  let flat = 0;
+
+  for (let i = 0; i < curve.length; i += 1) {
+    // What the material has here, if anyone has measured it. Without that,
+    // every octave counts the same - which is a fair guess and no better than
+    // a guess, because a shelf on a bass-heavy loop is a much bigger move than
+    // the same shelf on a hi-hat.
+    const weight = weights ? weights[i] : 1;
+    lifted += weight * 10 ** (curve[i] / 10);
+    flat += weight;
+  }
+
+  return 10 * Math.log10(lifted / flat);
+}
+
 /** Frequencies spaced the way the ear hears them, and the way an EQ draws them. */
 export function logFrequencies(count, low = 20, high = 20000) {
   return Array.from({ length: count }, (_, i) =>

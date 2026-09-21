@@ -1,3 +1,6 @@
+import { averageLift, liftFrequencies } from './filters.js';
+import { averageSpectrum } from './spectrum.js';
+
 /**
  * The loop, running through two EQ chains you can flip between.
  *
@@ -33,6 +36,16 @@ export class EQPlayer {
 
     this.mine = this.chain(ctx);
     this.theirs = this.chain(ctx);
+
+    // One band, on its own, for listening to what lives there.
+    this.soloFilter = ctx.createBiquadFilter();
+    this.soloFilter.type = 'bandpass';
+    this.soloFilter.frequency.value = 1000;
+    this.soloFilter.Q.value = 2;
+    this.soloGain = ctx.createGain();
+    this.soloGain.gain.value = 0;
+    this.soloFilter.connect(this.soloGain).connect(this.analyser);
+    this.soloing = null;
     // The fault, when there is one, is in the sample rather than in the EQ -
     // so it sits ahead of both chains and is heard whichever way you flip.
     this.faultNode = ctx.createBiquadFilter();
@@ -41,6 +54,9 @@ export class EQPlayer {
     this.faultNode.gain.value = 0;
     this.faultNode.connect(this.mine.input);
     this.faultNode.connect(this.theirs.input);
+    // Solo is taken before the EQ: the question it answers is what is in the
+    // sample at that frequency, not what your bands have done to it.
+    this.faultNode.connect(this.soloFilter);
 
     // Ready before the first flip, not after: `hear` does nothing until the
     // graph exists, so setting this afterwards left both chains at zero gain
@@ -62,11 +78,16 @@ export class EQPlayer {
 
     for (let i = 0; i < filters.length - 1; i += 1) filters[i].connect(filters[i + 1]);
 
+    // Auto gain: whatever the curve adds overall, this takes back off, so the
+    // two sides of the A/B are the same loudness and only the shape differs.
+    const trim = ctx.createGain();
+    trim.gain.value = 1;
+
     const gain = ctx.createGain();
     gain.gain.value = 0;
-    filters[filters.length - 1].connect(gain).connect(this.analyser);
+    filters[filters.length - 1].connect(trim).connect(gain).connect(this.analyser);
 
-    return { input: filters[0], filters, gain };
+    return { input: filters[0], filters, trim, gain };
   }
 
   /**
@@ -79,7 +100,10 @@ export class EQPlayer {
    * decibel and a half off 60. The drawn curve simply leaves an off band out,
    * so the sound has to as well or the two stop agreeing at the edges.
    */
-  static tune(chain, bands, at) {
+  static tune(chain, bands, at, rate, weights) {
+    const lift = averageLift(bands, rate, weights);
+    chain.trim.gain.setTargetAtTime(10 ** (-lift / 20), at, 0.02);
+
     bands.forEach((band, i) => {
       const filter = chain.filters[i];
       const off = band.on === false;
@@ -93,12 +117,52 @@ export class EQPlayer {
 
   setBands(bands) {
     if (!this.ready) return;
-    EQPlayer.tune(this.mine, bands, this.engine.ctx.currentTime);
+    this.bands = bands;
+    EQPlayer.tune(this.mine, bands, this.engine.ctx.currentTime, this.engine.ctx.sampleRate, this.weights);
   }
 
   setTarget(bands) {
     if (!this.ready) return;
-    EQPlayer.tune(this.theirs, bands, this.engine.ctx.currentTime);
+    this.targetBands = bands;
+    EQPlayer.tune(this.theirs, bands, this.engine.ctx.currentTime, this.engine.ctx.sampleRate, this.weights);
+  }
+
+  /** What the source is made of, so auto gain knows what a move is worth. */
+  measure(buffer) {
+    this.weights = averageSpectrum(buffer, liftFrequencies());
+    if (this.bands) this.setBands(this.bands);
+    if (this.targetBands) this.setTarget(this.targetBands);
+  }
+
+  /**
+   * Listen to one band on its own - the part of the sample it is working on.
+   *
+   * What "its part" means depends on the band: a peak is the region around it,
+   * a shelf is everything past its corner, and a cut is the thing it is
+   * throwing away, which is the most useful of the three to hear.
+   */
+  setSolo(band) {
+    if (!this.ready) return;
+    const at = this.engine.ctx.currentTime;
+    this.soloing = band ? { ...band } : null;
+
+    if (band) {
+      const listen = {
+        peaking: 'bandpass',
+        lowshelf: 'lowpass',
+        highshelf: 'highpass',
+        highpass: 'lowpass',
+        lowpass: 'highpass',
+      }[band.type];
+
+      this.soloFilter.type = listen;
+      this.soloFilter.frequency.setTargetAtTime(band.frequency, at, 0.01);
+      this.soloFilter.Q.setTargetAtTime(listen === 'bandpass' ? Math.max(0.7, band.q) : 0.7, at, 0.01);
+    }
+
+    this.soloGain.gain.setTargetAtTime(band ? 1 : 0, at, 0.01);
+    this.mine.gain.gain.setTargetAtTime(band ? 0 : (this.hearing === 'mine' ? 1 : 0), at, 0.01);
+    this.theirs.gain.gain.setTargetAtTime(band ? 0 : (this.hearing === 'mine' ? 0 : 1), at, 0.01);
   }
 
   /** The fault baked into the sample, or nothing. */
@@ -113,15 +177,25 @@ export class EQPlayer {
   /** Flip between your EQ and theirs, quickly enough to compare. */
   hear(which) {
     this.hearing = which;
-    if (!this.ready) return;
+    if (!this.ready || this.soloing) return;
     const at = this.engine.ctx.currentTime;
     this.mine.gain.gain.setTargetAtTime(which === 'mine' ? 1 : 0, at, 0.008);
     this.theirs.gain.gain.setTargetAtTime(which === 'mine' ? 0 : 1, at, 0.008);
   }
 
+  /** Something the player brought themselves, decoded and kept for the session. */
+  async load(file) {
+    const ctx = this.engine.ensure();
+    this.yours = await ctx.decodeAudioData(await file.arrayBuffer());
+    return this.yours;
+  }
+
   async play(kind) {
     this.build();
-    const buffer = await this.engine.renderLoop(kind);
+    const buffer = kind === 'yours' ? this.yours : await this.engine.renderLoop(kind);
+    if (!buffer) return false;
+
+    this.measure(buffer);
     this.stop();
 
     const source = this.engine.ctx.createBufferSource();

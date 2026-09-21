@@ -21,7 +21,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MODULES = [
   'theory.js', 'random.js', 'engrave.js',
   'audio.js',
-  'eq/filters.js', 'eq/player.js', 'eq/plugin.js',
+  'eq/filters.js', 'eq/spectrum.js', 'eq/player.js', 'eq/plugin.js',
   'modes/scoring.js',
   'modes/chords.js', 'modes/pitch.js', 'modes/intervals.js', 'modes/eq.js',
   'modes/rhythm.js', 'modes/panning.js', 'modes/compression.js',

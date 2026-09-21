@@ -1,4 +1,4 @@
-import { BAND_TYPES, bandGainAt, contributionOf, curveOf, logFrequencies, shortHz } from './filters.js';
+import { BAND_TYPES, averageLift, contributionOf, curveOf, logFrequencies, shortHz } from './filters.js';
 import { EQPlayer } from './player.js';
 
 const LOW = 20;
@@ -76,6 +76,7 @@ export class EQPlugin {
       <div class="eq">
         <div class="eq-head">
           <span class="eq-name">Channel EQ</span>
+          <span class="eq-trim" id="eqTrim"></span>
           <span class="eq-read" id="eqRead"></span>
         </div>
         <div class="eq-display">
@@ -89,6 +90,7 @@ export class EQPlugin {
             <button class="ab-btn is-on" type="button" data-hear="mine">Yours</button>
             <button class="ab-btn" type="button" data-hear="theirs" id="eqOther">Target</button>
           </div>
+          <button class="ab-btn solo-btn" type="button" data-eq="solo" aria-pressed="false">Solo band</button>
           <label class="field">
             <span class="field-label">Sample</span>
             <select id="eqSource">
@@ -96,8 +98,10 @@ export class EQPlugin {
               <option value="drums">Drums</option>
               <option value="instrument">Keys</option>
               <option value="noise">Pink noise</option>
+              <option value="yours" id="eqYours" hidden>Your own</option>
             </select>
           </label>
+          <label class="file-btn">Open a file<input type="file" id="eqFile" accept="audio/*"></label>
           <button class="link-btn" type="button" data-eq="flatten">Flatten</button>
         </div>
       </div>`;
@@ -198,6 +202,7 @@ export class EQPlugin {
       const action = e.target.closest('[data-eq]');
       if (!action) return;
       if (action.dataset.eq === 'play') this.toggle();
+      if (action.dataset.eq === 'solo') this.toggleSolo();
       if (action.dataset.eq === 'flatten' && this.interactive) {
         for (const band of this.bands) { band.gain = 0; band.on = false; }
         this.changed();
@@ -207,6 +212,33 @@ export class EQPlugin {
     this.el.querySelector('#eqSource').addEventListener('change', (e) => {
       this.source = e.target.value;
       if (this.player.playing) this.player.play(this.source);
+    });
+
+    this.el.querySelector('#eqFile').addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const yours = this.el.querySelector('#eqYours');
+      yours.hidden = false;
+      yours.textContent = 'reading…';
+
+      try {
+        const buffer = await this.player.load(file);
+        this.el.querySelector('#eqSource').value = 'yours';
+        this.source = 'yours';
+        // Straight onto it: somebody who has just chosen a file wants to hear
+        // their own material, not to be told it loaded.
+        await this.player.play('yours');
+        this.playing(true);
+        this.player.setBands(this.bands);
+        // Named where it was chosen, so it reads as what the picker is set to.
+        const yours = this.el.querySelector('#eqYours');
+        yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
+      } catch {
+        yours.textContent = 'that file could not be read';
+        return;
+      }
+      this.draw();
     });
 
     this.resize = () => this.draw();
@@ -312,6 +344,9 @@ export class EQPlugin {
 
   changed({ keepControls = false } = {}) {
     this.player.setBands(this.bands);
+    // Soloing follows the selection, so picking another band while listening
+    // moves the ear rather than dropping out of solo.
+    if (this.player.soloing) this.player.setSolo(this.bands[this.selected]);
     this.buildBandButtons();
     if (!keepControls) this.buildControls();
     else this.syncControls();
@@ -332,24 +367,48 @@ export class EQPlugin {
   }
 
   async toggle() {
-    const button = this.el.querySelector('[data-eq="play"]');
     if (this.player.playing) {
       this.player.stop();
-      button.textContent = 'Play';
-      cancelAnimationFrame(this.frame);
-      this.frame = null;
+      this.playing(false);
       this.draw();
       return;
     }
 
     await this.player.play(this.source);
     this.player.setBands(this.bands);
-    button.textContent = 'Stop';
+    this.playing(true);
+  }
+
+  /** The transport's own state, in one place. */
+  playing(on) {
+    this.el.querySelector('[data-eq="play"]').textContent = on ? 'Stop' : 'Play';
+
+    cancelAnimationFrame(this.frame);
+    this.frame = null;
+    if (!on) return;
+
     const tick = () => {
       this.draw();
       this.frame = requestAnimationFrame(tick);
     };
     tick();
+  }
+
+  /**
+   * Hear the selected band on its own.
+   *
+   * The fastest way to learn what a frequency sounds like is to listen to it
+   * with nothing else in the way - and on a cut, what you hear is exactly what
+   * you are throwing out.
+   */
+  toggleSolo() {
+    const button = this.el.querySelector('[data-eq="solo"]');
+    const on = button.getAttribute('aria-pressed') !== 'true';
+
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    button.classList.toggle('is-on', on);
+    this.player.setSolo(on ? this.bands[this.selected] : null);
+    this.draw();
   }
 
   /* ---------- drawing ---------- */
@@ -539,6 +598,15 @@ export class EQPlugin {
   }
 
   writeReadout() {
+    // What auto gain is taking back off, said out loud: it is doing something
+    // to what you hear, so it should not be doing it invisibly. It keeps its
+    // place whatever is loaded - the file's name belongs on the thing that
+    // chose it, not in front of the number.
+    const lift = averageLift(this.bands, this.rate(), this.player.weights);
+    this.el.querySelector('#eqTrim').textContent = Math.abs(lift) < 0.1
+      ? 'auto gain · none'
+      : `auto gain · ${lift > 0 ? '−' : '+'}${Math.abs(lift).toFixed(1)} dB`;
+
     const band = this.bands[this.selected];
     const type = BAND_TYPES[band.type];
     const parts = [type.label, `${shortHz(band.frequency)} Hz`];
