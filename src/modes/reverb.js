@@ -1,6 +1,5 @@
-import {
-  VERB_DEFAULTS, makeImpulse, decayCurve, profileDistance, monoOf, roomProfile,
-} from '../verb/ir.js';
+import { VERB_DEFAULTS, makeImpulse, roomProfile } from '../verb/ir.js';
+import { decayCurve, profileDistance, monoOf } from '../fx/response.js';
 import { VerbPlugin, writeSeconds } from '../verb/plugin.js';
 import { LOOP_BEAT } from '../audio.js';
 import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
@@ -67,8 +66,14 @@ const IN_TIME = { easy: 0.35, medium: 0.22, hard: 0.14 };
 const CLEARED = -30;
 const STILL_A_ROOM = { easy: 20, medium: 14, hard: 9 };
 
-/** The subdivisions a reverb is asked to answer on. */
-const DIVISIONS = [
+/**
+ * The subdivisions a reverb is asked to answer on.
+ *
+ * Its own list rather than the delay's: a pre-delay is a gap of a few tens of
+ * milliseconds and a delay is a repeat of a few hundred, so the two want
+ * different ends of the bar.
+ */
+const PRE_DIVISIONS = [
   { id: 'thirtysecond', label: 'a 32nd', beats: 1 / 8 },
   { id: 'sixteenth', label: 'a 16th', beats: 1 / 4 },
   { id: 'eighth', label: 'an 8th', beats: 1 / 2 },
@@ -128,7 +133,7 @@ export default {
 
   makePuzzle(rng, tier, settings) {
     if (settings.exercise === 'tempo') {
-      const division = pick(rng, DIVISIONS);
+      const division = pick(rng, PRE_DIVISIONS);
       return {
         answer: {
           // How long the room may go on for: to the next beat, or the one after.

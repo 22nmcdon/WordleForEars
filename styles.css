@@ -278,6 +278,10 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 }
 /* Paper radius: a sheet does not have rounded corners. */
 .field select {
+  /* A flex item will not shrink below its own content unless it is told it
+     may, and a select is as wide as its longest option - so one mode with a
+     wordy difficulty blurb pushed the whole page sideways on a phone. */
+  min-width: 0;
   max-width: 100%;
   background: var(--paper);
   border: 1px solid var(--line);
@@ -727,7 +731,7 @@ input.knob-value:focus {
    The displays are dark and everything around them is not. That is how a
    plugin looks, and inverting it for the sake of the page would cost more in
    legibility than it gained in manners. */
-.comp, .verb { display: flex; flex-direction: column; gap: 12px; }
+.comp, .verb, .echo { display: flex; flex-direction: column; gap: 12px; }
 
 .plugin-head {
   display: flex;
@@ -834,6 +838,28 @@ input.knob-value:focus {
   height: clamp(190px, 32vh, 290px);
 }
 
+/* --- the delay ------------------------------------------------------------- */
+/* The repeats get the wider panel, because where they fall against the beats
+   is the whole question. Left above the line and right below it, so a
+   ping-pong is something you can see stepping across. */
+.echo-display {
+  display: grid;
+  grid-template-columns: 1.6fr minmax(140px, 1fr);
+  gap: 8px;
+  height: clamp(190px, 32vh, 290px);
+}
+
+/* Where the repeats go, and what note they are on. Its own row, because it is
+   a question about routing rather than about sound. */
+.echo-routing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 /* Names a panel within a plugin - the compressor's detector, the EQ's
    analyser. Shared, because a second rule for the same thing is a second rule
    to keep in step. */
@@ -870,7 +896,8 @@ input.knob-value:focus {
   .comp-panel-trace { grid-area: trace; }
   .comp-panel-meters { grid-area: meters; }
 
-  .verb-display {
+  .verb-display,
+  .echo-display {
     grid-template-columns: 1fr;
     height: clamp(260px, 48vh, 360px);
   }

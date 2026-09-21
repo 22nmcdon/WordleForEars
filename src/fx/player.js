@@ -1,32 +1,38 @@
-import { VERB_DEFAULTS, makeImpulse } from './ir.js';
-
 /**
- * The loop, in two rooms you can flip between.
+ * The loop, through two of something, with a switch between them.
  *
  *   dry loop ─┬─ yours:  dry ─┐
  *             │         wet ─┴─ yours  ─┐
  *             └─ theirs: dry ─┐         ├─ out
  *                       wet ─┴─ theirs ─┘
  *
- * The wet side is rendered rather than convolved live, which is the decision
+ * The something is whatever `impulseOf` builds - a room, a set of repeats,
+ * anything that can be written down as an impulse response. Both the reverb
+ * and the delay are that, and neither of them needs a player of its own.
+ *
+ * The wet side is rendered rather than processed live, which is the decision
  * everything else here follows from. A ConvolverNode handed a new impulse
  * throws away its history, so its tail has to build again from nothing - and
- * with a two second room that is two seconds of the reverb fading up every
- * time a knob moves. Rendering the loop through the impulse offline instead
- * gives a wet loop that is already whole, and changing a setting becomes a
- * crossfade between two of them.
+ * with a two second room that is two seconds of it fading up every time a
+ * knob moves. Rendering the loop through the impulse offline instead gives a
+ * wet loop that is already whole, and changing a setting becomes a crossfade
+ * between two of them. For a delay it buys something else as well: the
+ * repeats land exactly where the setting says, rather than being retimed
+ * under a moving playhead.
  *
- * The render also wraps: what is still ringing when the loop comes round is
- * folded back over the beginning, so the reverb joins up instead of being cut
+ * The render also wraps: what is still sounding when the loop comes round is
+ * folded back over the beginning, so the effect joins up instead of being cut
  * off at the splice. That is the same trick the bed itself is built with, and
- * a reverb is where you would hear it missing.
+ * a tail is where you would hear it missing.
  */
-export class VerbPlayer {
-  constructor(engine, { source = 'instrument' } = {}) {
+export class ImpulsePlayer {
+  constructor(engine, { source = 'instrument', impulseOf, defaults = {} } = {}) {
     this.engine = engine;
     this.source = source;
+    this.impulseOf = impulseOf;
+    this.defaults = defaults;
     this.hearing = 'mine';
-    this.settings = { ...VERB_DEFAULTS };
+    this.settings = { ...defaults };
     this.target = null;
     this.ready = false;
     this.buffer = null;
@@ -100,7 +106,7 @@ export class VerbPlayer {
   async renderWet(settings) {
     const ctx = this.engine.ensure();
     const rate = ctx.sampleRate;
-    const impulse = makeImpulse(rate, settings);
+    const impulse = this.impulseOf(rate, settings);
     const loop = this.buffer.length;
 
     const offline = new OfflineAudioContext(2, loop + impulse.length, rate);
@@ -108,9 +114,9 @@ export class VerbPlayer {
     source.buffer = this.buffer;
 
     const convolver = offline.createConvolver();
-    // Off, because the impulse is already normalised to unit energy and a
-    // second normalisation with a rule of its own would put the level of the
-    // room back out of anybody's hands.
+    // Off, because the impulse arrives at the level it means and a second
+    // normalisation with a rule of its own would put that back out of
+    // anybody's hands.
     convolver.normalize = false;
     convolver.buffer = this.toBuffer(impulse);
 
@@ -144,7 +150,7 @@ export class VerbPlayer {
   }
 
   async setTarget(settings) {
-    this.target = settings ? { ...VERB_DEFAULTS, ...settings } : null;
+    this.target = settings ? { ...this.defaults, ...settings } : null;
     if (!this.target) return null;
     return this.refresh('theirs', this.target);
   }
@@ -164,11 +170,11 @@ export class VerbPlayer {
   }
 
   /**
-   * How loud each half of this room is.
+   * How loud each half of this is.
    *
    * The wet path is trimmed to the level of the dry one first, so that `mix`
    * is a balance rather than a number whose meaning depends on how long the
-   * room is. Then the pair is trimmed together, so that moving the mix does
+   * tail is. Then the pair is trimmed together, so that moving the mix does
    * not change how loud the whole thing is - the same reason every other
    * plugin in this app has an auto gain, and the same false positive it
    * exists to kill.
@@ -209,8 +215,8 @@ export class VerbPlayer {
     const at = ctx.currentTime + 0.08;
     this.startedAt = at;
 
-    // One dry loop feeding both rooms, so flipping between them is the room
-    // changing and not the take changing.
+    // One dry loop feeding both sides, so flipping between them is the
+    // effect changing and not the take changing.
     this.dryNode = ctx.createBufferSource();
     this.dryNode.buffer = this.buffer;
     this.dryNode.loop = true;
@@ -244,11 +250,11 @@ export class VerbPlayer {
   }
 
   /**
-   * Fades from the room that is playing into the one just built.
+   * Fades from what is playing into what was just built.
    *
    * Started at the point of the loop the old one has reached, so the two are
-   * the same bar and the crossfade is between two rooms rather than between
-   * two places in the music.
+   * the same bar and the crossfade is between two settings rather than
+   * between two places in the music.
    */
   swap(side, wet) {
     const ctx = this.engine.ctx;

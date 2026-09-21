@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { VERB_DEFAULTS, MOST_DECAY, makeImpulse, roomProfile } from '../src/verb/ir.js';
 import {
-  VERB_DEFAULTS, VERB_BANDS, MOST_DECAY, DECAY_FLOOR,
-  makeImpulse, monoOf, bandOf, rt60, decayCurve, decayTimes,
-  roomProfile, profileDistance, wetDryImpulse,
-} from '../src/verb/ir.js';
+  RESPONSE_BANDS, monoOf, bandOf, rt60, decayTimes, profileDistance, wetDryImpulse,
+} from '../src/fx/response.js';
 import reverb from '../src/modes/reverb.js';
 import { LOOP_BEAT } from '../src/audio.js';
 
@@ -34,7 +33,7 @@ test('damping shortens the top and leaves the bottom alone', () => {
   const decay = 2.4;
   const measure = (damping) => {
     const mono = monoOf(room({ decay, damping, early: 0, preDelay: 0 }));
-    return Object.fromEntries(VERB_BANDS.map((band) =>
+    return Object.fromEntries(RESPONSE_BANDS.map((band) =>
       [band.id, rt60(bandOf(mono, rate, band), rate)]));
   };
 

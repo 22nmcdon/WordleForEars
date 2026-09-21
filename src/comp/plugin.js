@@ -1,5 +1,6 @@
 import { staticGain, COMP_DEFAULTS } from './dsp.js';
 import { CompPlayer } from './player.js';
+import { dialOf, offDial, sizeOf, readyCanvas } from '../fx/panel.js';
 
 /**
  * The compressor, as a plugin you work rather than a question you answer.
@@ -44,12 +45,6 @@ const COMP_SIDECHAIN = [
   { id: 'scHigh', name: 'Key high-pass', min: 20, max: 1000, log: true, write: writeHertz },
   { id: 'scLow', name: 'Key low-pass', min: 200, max: 20000, log: true, write: writeHertz },
 ];
-
-const slider = (knob, value) => (knob.log
-  ? { min: Math.log2(knob.min), max: Math.log2(knob.max), step: 0.01, at: Math.log2(Math.max(knob.min, value)) }
-  : { min: knob.min, max: knob.max, step: knob.step, at: value });
-
-const fromSlider = (knob, raw) => (knob.log ? 2 ** Number(raw) : Number(raw));
 
 /** The colours, read off the page so the plugin follows whatever light it is in. */
 function compPalette(el) {
@@ -170,7 +165,7 @@ export class CompPlugin {
 
   buildKnobs() {
     const write = (knobs) => knobs.map((knob) => {
-      const dial = slider(knob, this.settings[knob.id]);
+      const dial = dialOf(knob, this.settings[knob.id]);
       return `
         <div class="knob" data-knob="${knob.id}">
           <label class="knob-name" for="comp-${knob.id}">${knob.name}</label>
@@ -194,7 +189,7 @@ export class CompPlugin {
         const dial = e.target.closest('[data-dial]');
         if (!dial || !this.interactive) return;
         const knob = [...COMP_KNOBS, ...COMP_SIDECHAIN].find((k) => k.id === dial.dataset.dial);
-        this.settings[knob.id] = fromSlider(knob, dial.value);
+        this.settings[knob.id] = offDial(knob, dial.value);
         this.changed();
       });
     }
@@ -299,7 +294,7 @@ export class CompPlugin {
    * since it is how far the loud end has been pulled towards the quiet one.
    */
   handles() {
-    const { width, height } = this.sizeOf(this.curve);
+    const { width, height } = sizeOf(this.curve);
     const { threshold, ratio, knee } = this.settings;
     const topDb = staticGain(0, threshold, ratio, knee);
 
@@ -330,7 +325,7 @@ export class CompPlugin {
 
   drag(e) {
     if (!this.holding || !this.interactive) return;
-    const { width, height } = this.sizeOf(this.curve);
+    const { width, height } = sizeOf(this.curve);
     const at = this.on(this.curve, e);
 
     if (this.holding === 'threshold') {
@@ -417,28 +412,6 @@ export class CompPlugin {
 
   /* ---------- drawing ---------- */
 
-  sizeOf(canvas) {
-    const box = canvas.getBoundingClientRect();
-    return { width: box.width, height: box.height };
-  }
-
-  /** Sets a canvas up for its own pixels, and hands back a context. */
-  ready(canvas) {
-    const { width, height } = this.sizeOf(canvas);
-    if (!width || !height) return null;
-
-    const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(width * dpr)) {
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-    }
-
-    const c = canvas.getContext('2d');
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.clearRect(0, 0, width, height);
-    return { c, width, height };
-  }
-
   /**
    * The loop, boiled down to one value per pixel column.
    *
@@ -448,7 +421,7 @@ export class CompPlugin {
    * audio. It is redone when the settings change, which is when it differs.
    */
   restage() {
-    const { width } = this.sizeOf(this.trace);
+    const { width } = sizeOf(this.trace);
     const gr = this.player.trace;
     const samples = this.player.samples;
     if (!width || !gr || !samples) return;
@@ -500,7 +473,7 @@ export class CompPlugin {
   }
 
   drawCurve(ink) {
-    const stage = this.ready(this.curve);
+    const stage = readyCanvas(this.curve);
     if (!stage) return;
     const { c, width, height } = stage;
     const { threshold, ratio, knee } = this.settings;
@@ -594,7 +567,7 @@ export class CompPlugin {
   }
 
   drawTrace(ink) {
-    const stage = this.ready(this.trace);
+    const stage = readyCanvas(this.trace);
     if (!stage) return;
     const { c, width, height } = stage;
 
@@ -654,7 +627,7 @@ export class CompPlugin {
   }
 
   drawMeters(ink) {
-    const stage = this.ready(this.meters);
+    const stage = readyCanvas(this.meters);
     if (!stage) return;
     const { c, width, height } = stage;
 

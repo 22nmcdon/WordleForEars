@@ -69,6 +69,12 @@ export function wrongGuess(puzzle, nth = 0) {
       return { threshold: -55 + nth, ratio: 18, attack: 1, release: 30, sidechain: false };
     }
 
+    if (puzzle.mode === 'delay') {
+      // Far longer than any note value at this tempo, and swamped - which is
+      // wrong for matching a delay and wrong for finding a time.
+      return { time: 1300 + nth * 20, feedback: 0.75, mix: 0.9, tone: 20000, lowCut: 20 };
+    }
+
     if (puzzle.mode === 'reverb') {
       // Longer than any room this mode asks for, answering instantly, and
       // soaked - which is wrong for matching a space and wrong for fitting a

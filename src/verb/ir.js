@@ -1,5 +1,8 @@
 import { makeBiquad, setBiquad, runBiquad } from '../comp/dsp.js';
 import { mulberry32 } from '../random.js';
+import {
+  RESPONSE_BANDS, LONGEST_TAIL, decayProfile, decayTimes, monoOf, wetDryImpulse,
+} from '../fx/response.js';
 
 // A room, as an impulse response.
 //
@@ -26,13 +29,6 @@ export const VERB_DEFAULTS = {
   mix: 0.3,          // 0 is dry, 1 is nothing but room
 };
 
-/** The bands a decay is read in - the three an engineer talks about. */
-export const VERB_BANDS = [
-  { id: 'low', label: 'Low', low: 60, high: 400 },
-  { id: 'mid', label: 'Mid', low: 400, high: 3000 },
-  { id: 'high', label: 'High', low: 3000, high: 12000 },
-];
-
 /**
  * Where the tail is split into something that damps and something that does
  * not, and how sharply.
@@ -46,9 +42,6 @@ export const VERB_BANDS = [
  */
 const DAMP_CROSSOVER = 1200;
 const CROSSOVER_POLES = 2;
-
-/** The floor a decay is read down to. Below this there is nothing to hear. */
-export const DECAY_FLOOR = -60;
 
 /**
  * Early reflections, as fractions of the time it takes sound to cross the
@@ -64,10 +57,8 @@ const TAPS = [0.21, 0.34, 0.41, 0.58, 0.63, 0.79, 0.87, 1.0, 1.19, 1.31];
 /** How fast sound travels, in metres a second. */
 const SPEED = 343;
 
-const sq = (x) => x * x;
-
 /** The longest room on offer, plus room for it to finish. */
-export const MOST_DECAY = 8;
+export const MOST_DECAY = LONGEST_TAIL;
 const CACHE_SECONDS = MOST_DECAY * 1.1 + 0.5;
 
 /**
@@ -196,7 +187,7 @@ export function makeImpulse(rate, params = {}) {
   // room's energy that arrives as walls, and the taps are scaled to it.
   const tailEnergy = channels.reduce((sum, out) => {
     let band = 0;
-    for (let i = 0; i < length; i += 1) band += sq(out[i]);
+    for (let i = 0; i < length; i += 1) band += out[i] * out[i];
     return sum + band;
   }, 0);
 
@@ -214,7 +205,7 @@ export function makeImpulse(rate, params = {}) {
     });
   }
 
-  const wallEnergy = walls.reduce((sum, wall) => sum + sq(wall.level), 0);
+  const wallEnergy = walls.reduce((sum, wall) => sum + wall.level * wall.level, 0);
   const share = Math.min(0.85, Math.max(0, early));
   if (wallEnergy > 0 && tailEnergy > 0 && share > 0) {
     const scale = Math.sqrt(((share / (1 - share)) * tailEnergy) / wallEnergy);
@@ -240,212 +231,11 @@ export function makeImpulse(rate, params = {}) {
   // A/B becomes a level test again - the same false positive auto gain exists
   // to kill everywhere else in this app.
   let energy = 0;
-  for (const out of channels) for (let i = 0; i < length; i += 1) energy += sq(out[i]);
+  for (const out of channels) for (let i = 0; i < length; i += 1) energy += out[i] * out[i];
   const scale = energy > 0 ? 1 / Math.sqrt(energy) : 0;
   for (const out of channels) for (let i = 0; i < length; i += 1) out[i] *= scale;
 
   return { channels, rate, length, seconds: length / rate, preDelay: pre / rate };
-}
-
-/* ---------- reading a room ---------- */
-
-/**
- * The energy decay curve, in decibels: how much of the response is still to
- * come at each moment.
- *
- * Schroeder's backwards integral, which is the standard way to measure a
- * decay and far steadier than looking at the envelope - a tail is noise, and
- * noise wanders several decibels from sample to sample while the integral of
- * it does not wander at all.
- */
-export function decayCurve(samples, rate, times, against = null) {
-  const running = new Float64Array(samples.length + 1);
-  for (let i = samples.length - 1; i >= 0; i -= 1) {
-    running[i] = running[i + 1] + sq(samples[i]);
-  }
-
-  // Against the whole room, when a caller has one: that is what makes this a
-  // reading of a band's share as well as of its decay.
-  const total = against ?? running[0];
-  if (total <= 0) return times.map(() => DECAY_FLOOR);
-
-  return times.map((t) => {
-    const at = Math.round(t * rate);
-    if (at >= samples.length) return DECAY_FLOOR;
-    const left = running[at] / total;
-    return Math.max(DECAY_FLOOR, 10 * Math.log10(Math.max(left, 1e-12)));
-  });
-}
-
-/**
- * The decay time, measured rather than assumed.
- *
- * Read off the part of the curve between -5 and -25 dB and extrapolated to
- * -60, which is what a room measurement does: the first few decibels are the
- * direct sound and the last few are under the noise, and neither belongs to
- * the decay.
- */
-export function rt60(samples, rate) {
-  const step = 0.005;
-  const times = [];
-  for (let t = 0; t < samples.length / rate; t += step) times.push(t);
-  const curve = decayCurve(samples, rate, times);
-
-  const cross = (db) => {
-    for (let i = 0; i < curve.length; i += 1) if (curve[i] <= db) return times[i];
-    return null;
-  };
-
-  const from = cross(-5);
-  const to = cross(-25);
-  if (from === null || to === null || to <= from) return 0;
-  return ((to - from) * 60) / 20;
-}
-
-/**
- * Clarity, in decibels: the sound that arrives early against the sound that
- * arrives late.
- *
- * C80 is the acoustician's number for whether a hall is muddy, and it is
- * exactly the thing pre-delay and the early-late balance are for. Positive is
- * clear, negative is a wash, and the difference between a room you can put a
- * vocal in and one you cannot is a few decibels of it.
- */
-export function clarity(samples, rate, ms = 80) {
-  const split = Math.round((ms / 1000) * rate);
-  let early = 0;
-  let late = 0;
-  for (let i = 0; i < samples.length; i += 1) {
-    if (i < split) early += sq(samples[i]);
-    else late += sq(samples[i]);
-  }
-  if (late <= 0) return 60;
-  if (early <= 0) return -60;
-  return Math.max(-60, Math.min(60, 10 * Math.log10(early / late)));
-}
-
-/** One band of a response, for reading its decay on its own. */
-export function bandOf(samples, rate, band) {
-  const out = new Float32Array(samples.length);
-  out.set(samples);
-
-  if (band.low > 20) {
-    for (let pass = 0; pass < 2; pass += 1) {
-      const hp = setBiquad(makeBiquad(), 'highpass', band.low, rate);
-      for (let i = 0; i < out.length; i += 1) out[i] = runBiquad(hp, out[i]);
-    }
-  }
-  if (band.high < 20000) {
-    for (let pass = 0; pass < 2; pass += 1) {
-      const lp = setBiquad(makeBiquad(), 'lowpass', band.high, rate);
-      for (let i = 0; i < out.length; i += 1) out[i] = runBiquad(lp, out[i]);
-    }
-  }
-
-  return out;
-}
-
-/**
- * The times a decay is compared at.
- *
- * Spaced logarithmically, because a decay is heard as a ratio: the difference
- * between a third of a second and half a second is a different room, and the
- * difference between five seconds and five and a bit is nothing at all. On an
- * even grid out to seven seconds every short room sat on the floor after four
- * points and they all read the same.
- */
-export const decayTimes = (count = 60, from = 0.004, to = MOST_DECAY) =>
-  [0, ...Array.from({ length: count - 1 }, (_, i) =>
-    from * (to / from) ** (i / (count - 2)))];
-
-/**
- * What a room does, in the terms it is judged in: how it decays, band by band.
- *
- * Takes the response to read rather than the room, because what anybody hears
- * is the dry sound and the room together - see `wetDryImpulse`. Handed the
- * wet side on its own, the mix knob was invisible: the reverb decays the same
- * way whether it is at five per cent or a hundred, so a match could be scored
- * perfect with the reverb turned all the way down and nothing audible at all.
- *
- * One reading then covers every control at once. Decay is the slope of it,
- * pre-delay is the flat part at the start, damping is the three bands pulling
- * apart, the early-late balance is the shape of the first few decibels, the
- * send filters are where each band begins, and the mix is the step down from
- * the direct sound to the room - so two reverbs whose profiles sit on each
- * other are the same reverb, however their knobs were arrived at.
- */
-export function decayProfile(mono, rate, times = decayTimes()) {
-  // Every band against the whole room rather than against itself. Normalised
-  // band by band, a room with the low end filtered off its send read as
-  // identical to one without - its low band still decayed from nought to
-  // minus sixty, there was just less of it. Against the total, a band that
-  // has been taken out starts low and stays low, so what the send filters do
-  // is in the same reading as everything else.
-  const bands = VERB_BANDS.map((band) => bandOf(mono, rate, band));
-  const total = bands.reduce((sum, samples) => {
-    let energy = 0;
-    for (let i = 0; i < samples.length; i += 1) energy += sq(samples[i]);
-    return sum + energy;
-  }, 0);
-
-  const profile = {};
-  VERB_BANDS.forEach((band, i) => {
-    profile[band.id] = decayCurve(bands[i], rate, times, total);
-  });
-  return profile;
-}
-
-/**
- * Both ears together, for measuring - a room's decay is not a stereo question.
- *
- * Summed rather than averaged, because this is a measurement and the two
- * channels of a room are very nearly uncorrelated: adding them keeps the
- * energy, and averaging them throws away about five and a half decibels of
- * it. That matters in one place and matters a lot there - `wetDryImpulse`
- * weighs the room against a direct sound of a known size, so a room measured
- * five decibels quiet reads as five decibels drier than it is.
- */
-export function monoOf(impulse) {
-  const [left, right] = impulse.channels;
-  const out = new Float32Array(impulse.length);
-  for (let i = 0; i < impulse.length; i += 1) out[i] = left[i] + (right ? right[i] : 0);
-  return out;
-}
-
-/** How far apart two rooms are, in decibels of decay. */
-export function profileDistance(mine, theirs) {
-  let sum = 0;
-  let count = 0;
-
-  for (const band of VERB_BANDS) {
-    const a = mine[band.id];
-    const b = theirs[band.id];
-    for (let i = 0; i < a.length; i += 1) {
-      sum += sq(a[i] - b[i]);
-      count += 1;
-    }
-  }
-
-  return Math.sqrt(sum / Math.max(1, count));
-}
-
-/**
- * The whole thing you actually hear: the dry signal and the room together.
- *
- * Clarity is a property of that, not of the reverb on its own - a wash of a
- * room with the mix at ten per cent is a perfectly clear sound, and the
- * reading has to say so.
- */
-export function wetDryImpulse(impulse, mix) {
-  const mono = monoOf(impulse);
-  const out = new Float32Array(mono.length);
-  const wet = Math.min(1, Math.max(0, mix));
-
-  for (let i = 0; i < out.length; i += 1) out[i] = mono[i] * wet;
-  // The dry path is the sound arriving with nothing done to it at all, which
-  // in these terms is exactly one sample at the front.
-  out[0] += 1 - wet;
-  return out;
 }
 
 /** A room, built and read in the terms a guess is marked in. */

@@ -1,9 +1,10 @@
+import { VERB_DEFAULTS, MOST_DECAY, makeImpulse } from './ir.js';
 import {
-  VERB_DEFAULTS, VERB_BANDS, MOST_DECAY, DECAY_FLOOR,
-  makeImpulse, decayProfile, decayTimes, rt60, bandOf, monoOf, wetDryImpulse,
-} from './ir.js';
-import { VerbPlayer } from './player.js';
+  RESPONSE_BANDS, DECAY_FLOOR, decayProfile, decayTimes, rt60, bandOf, monoOf, wetDryImpulse,
+} from '../fx/response.js';
+import { ImpulsePlayer } from '../fx/player.js';
 import { writeHertz } from '../comp/plugin.js';
+import { dialOf, offDial, sizeOf, readyCanvas, decayX, decayY } from '../fx/panel.js';
 
 /**
  * The reverb, as a plugin.
@@ -15,14 +16,6 @@ import { writeHertz } from '../comp/plugin.js';
  * marked against, so there is nothing hidden in the marking that is not on
  * the screen.
  */
-
-const TIME_LOW = 0.004;   // where the decay display starts, in seconds
-const TIME_HIGH = MOST_DECAY;
-
-const decayX = (t, width) => (t <= TIME_LOW
-  ? 0
-  : (Math.log2(t / TIME_LOW) / Math.log2(TIME_HIGH / TIME_LOW)) * width);
-const decayY = (db, height) => (db / DECAY_FLOOR) * height;
 
 const keepIn = (value, low, high) => Math.min(high, Math.max(low, value));
 
@@ -39,12 +32,6 @@ const VERB_KNOBS = [
   { id: 'highCut', name: 'High cut', min: 1500, max: 20000, log: true, write: writeHertz },
   { id: 'mix', name: 'Mix', min: 0, max: 1, step: 0.01, write: (v) => `${Math.round(v * 100)} %` },
 ];
-
-const dialOf = (knob, value) => (knob.log
-  ? { min: Math.log2(knob.min), max: Math.log2(knob.max), step: 0.005, at: Math.log2(Math.max(knob.min, value)) }
-  : { min: knob.min, max: knob.max, step: knob.step, at: value });
-
-const offDial = (knob, raw) => (knob.log ? 2 ** Number(raw) : Number(raw));
 
 /** The three bands wear the same warm-to-cool ramp the EQ's regions do. */
 const VERB_TINTS = { low: '--rust', mid: '--gold', high: '--enclosure' };
@@ -77,7 +64,11 @@ export class VerbPlugin {
     this.profile = null;
     this.columns = null;
 
-    this.player = new VerbPlayer(engine, { source });
+    this.player = new ImpulsePlayer(engine, {
+      source,
+      impulseOf: makeImpulse,
+      defaults: VERB_DEFAULTS,
+    });
 
     this.build();
     this.restage();
@@ -317,12 +308,12 @@ export class VerbPlugin {
 
     const mono = monoOf(this.impulse);
     this.measured = {
-      rt: Object.fromEntries(VERB_BANDS.map((band) =>
+      rt: Object.fromEntries(RESPONSE_BANDS.map((band) =>
         [band.id, rt60(bandOf(mono, rate, band), rate)])),
     };
 
     this.columns = null;
-    const { width } = this.sizeOf(this.room);
+    const { width } = sizeOf(this.room);
     if (!width) return;
 
     // The impulse boiled down to one pair of numbers a column: how far it
@@ -356,27 +347,6 @@ export class VerbPlugin {
     this.columns = { high, low, count, peak };
   }
 
-  sizeOf(canvas) {
-    const box = canvas.getBoundingClientRect();
-    return { width: box.width, height: box.height };
-  }
-
-  ready(canvas) {
-    const { width, height } = this.sizeOf(canvas);
-    if (!width || !height) return null;
-
-    const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(width * dpr)) {
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-    }
-
-    const c = canvas.getContext('2d');
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.clearRect(0, 0, width, height);
-    return { c, width, height };
-  }
-
   draw() {
     const ink = verbPalette(this.el);
     this.drawRoom(ink);
@@ -385,7 +355,7 @@ export class VerbPlugin {
   }
 
   drawRoom(ink) {
-    const stage = this.ready(this.room);
+    const stage = readyCanvas(this.room);
     if (!stage || !this.columns) return;
     const { c, width, height } = stage;
     const { high, low, count, peak } = this.columns;
@@ -454,7 +424,7 @@ export class VerbPlugin {
   }
 
   drawDecay(ink) {
-    const stage = this.ready(this.decay);
+    const stage = readyCanvas(this.decay);
     if (!stage || !this.profile) return;
     const { c, width, height } = stage;
 
@@ -478,7 +448,7 @@ export class VerbPlugin {
     }
 
     const trace = (profile, alpha, dash) => {
-      for (const band of VERB_BANDS) {
+      for (const band of RESPONSE_BANDS) {
         const curve = profile[band.id];
         c.beginPath();
         for (let i = 0; i < curve.length; i += 1) {
