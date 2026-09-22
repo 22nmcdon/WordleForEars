@@ -7,6 +7,7 @@ import panning from './panning.js';
 import compression from './compression.js';
 import reverb from './reverb.js';
 import delay from './delay.js';
+import saturation from './saturation.js';
 
 /**
  * The suite, in the order the project plan builds it: the two named modes
@@ -15,7 +16,7 @@ import delay from './delay.js';
  * read - and the shell around it does not know which one it is showing.
  */
 export const MODES = {
-  chords, pitch, intervals, eq, rhythm, panning, compression, reverb, delay,
+  chords, pitch, intervals, eq, rhythm, panning, compression, reverb, delay, saturation,
 };
 
 export const MODE_IDS = Object.keys(MODES);

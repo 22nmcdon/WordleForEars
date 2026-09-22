@@ -1,6 +1,6 @@
 # Harmonle — ear-training Wordle (proof of concept)
 
-An audio-production trainer that plays like Wordle. **Seven modes**, three
+An audio-production trainer that plays like Wordle. **Ten modes**, three
 tiers each, a daily puzzle per mode and unlimited practice. No accounts; stats
 stay in the browser.
 
@@ -15,8 +15,11 @@ an adjustment rather than a guess.
 | Mode | What you work with | Exercises |
 | --- | --- | --- |
 | **EQ** | **a channel EQ** — six bands you drag over a live spectrum, with the loop running | **Match** a target move · **Fix** a sample with a resonance in it |
-| **Compression** | threshold, ratio, and attack on Hard | **Match** a target compressor · **Even out** a loop whose hits are all over the place |
-| **Panning** | placement across the field | **Match** a target position |
+| **Compression** | **a compressor** — threshold, ratio, attack, release, knee, lookahead, a filtered sidechain and a key input | **Match** a target compressor · **Even out** a loop whose hits are all over the place · **Duck** one thing under another |
+| **Stereo** | **an imager** — mid/side width in three bands, two movable crossovers, a pan, and mono and side monitoring | **Place** a sound · **Match** a target image · **Rescue** a low end somebody spread too wide to survive mono |
+| **Reverb** | **a reverb** — decay, pre-delay, damping, early/late balance and mix | **Match** a room · **Fit** the tail to the tempo |
+| **Delay** | **a delay** — time or note division, feedback, ping-pong, a filtered repeat path and mix | **Match** a delay · **Find** the note it is on |
+| **Saturation** | **a saturator** — drive, bias, hardness, tone and a parallel mix, run eight times oversampled | **Match** how much · **Match** the colour · Build a warmth that is **even and not odd** |
 
 ### The EQ is a plugin
 
@@ -34,6 +37,24 @@ that marked you down for arriving by a different route would be teaching the
 plugin rather than the ear. The reading says how far apart the two curves get
 at their worst point, and where: `3.1 dB out`, `450 Hz too hot`. When the round
 ends the target is drawn over your curve, so you can see what you were chasing.
+
+### The saturator runs faster than the signal
+
+A nonlinearity makes harmonics without limit, and every one above half the
+sample rate folds back down to a frequency that is not a harmonic of anything.
+Measured at 48 kHz, a 220 Hz note is fine — the folded energy comes back 61 dB
+down — but a hi-hat is not: at a high drive the junk lands **10 dB** under the
+signal, and inharmonic is the one thing real saturation never sounds like. A
+mode built on that would be teaching people to recognise a sound no piece of
+gear makes. So the curve runs at **eight times the rate**, with a linear-phase
+filter either side of it, and the same hi-hat comes back **48 dB** down.
+
+You are judged on **the harmonics, not the controls**: the series a sine comes
+out as, second to tenth, worst one counted. Two sets of settings that make the
+same series are the same answer. The bars are gold for even and pink for odd,
+because that division is the whole ear skill — even harmonics are octaves and
+sound like the note getting larger, odd ones are fifths and sound like it
+breaking, and *warm* and *dirty* are those two piles of numbers.
 
 **The listening modes ask you to name what you heard**, which is what they are
 for — a chord quality is a thing you recognise, not a thing you dial.
@@ -109,7 +130,7 @@ that doing it right is audible rather than merely scored:
 
 ## What's in this POC
 
-- **All seven modes above**, each with three tiers, a daily seeded from the UTC
+- **All ten modes above**, each with three tiers, a daily seeded from the UTC
   date (the same puzzle for everybody) and unlimited practice. An exercise gets
   its own daily, because matching a target and curing a fault are different
   exercises rather than two views of one.
@@ -128,10 +149,6 @@ that doing it right is audible rather than merely scored:
 
 - **Guitar and synth-pad timbres** for chords — the plan's third variable. One
   piano for now.
-- **Stereo width** in panning, and **release** in compression: both are one more
-  control when wanted.
-- **Your own audio.** Everything is synthesised, so there is nothing to upload
-  a stem into yet.
 - Any server, account or cross-device sync. Stats live in `localStorage`.
 
 ## Adding a mode

@@ -880,6 +880,27 @@ input.knob-value:focus {
   border-top: 1px solid var(--line);
 }
 
+/* --- saturation ------------------------------------------------------------ */
+/* The curve gets the square panel, because it is a picture of one axis against
+   another and a stretched one lies about the symmetry - which is the only
+   thing anybody is looking at it for. The bars get the width, because there
+   are nine of them and they are read as a shape. */
+.heat-display {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.75fr) 1.6fr;
+  gap: 8px;
+  height: clamp(190px, 32vh, 290px);
+}
+
+.heat-routing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 /* Names a panel within a plugin - the compressor's detector, the EQ's
    analyser. Shared, because a second rule for the same thing is a second rule
    to keep in step. */
@@ -918,7 +939,8 @@ input.knob-value:focus {
 
   .verb-display,
   .echo-display,
-  .image-display {
+  .image-display,
+  .heat-display {
     grid-template-columns: 1fr;
     height: clamp(260px, 48vh, 360px);
   }

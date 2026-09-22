@@ -46,6 +46,7 @@ const RESULT_MARKED = {
   compression: ['fix', 'duck'],
   reverb: ['tempo'],
   panning: ['mono'],
+  saturation: ['even'],
 };
 
 /**
@@ -90,6 +91,16 @@ export function wrongGuess(puzzle, nth = 0) {
       // soaked - which is wrong for matching a space and wrong for fitting a
       // tempo, since a seven second tail is never gone by the next beat.
       return { decay: 7 + nth * 0.2, preDelay: 4, mix: 0.9, damping: 1, early: 0 };
+    }
+
+    if (puzzle.mode === 'saturation') {
+      // Barely touched, and perfectly symmetric. Slamming it was the first
+      // version of this and it was not wrong enough: at the top of the drive
+      // the series has flattened into a square wave, and the loudest target
+      // the "how much" exercise asks for is within a decibel of it. Nearly
+      // clean is far from everything - far too little for an amount, nowhere
+      // near any colour, and no even harmonics at all.
+      return { drive: nth * 0.4, bias: 0, hardness: 5, tone: 9000, mix: 1 };
     }
 
     // Nothing dialled at all, then a band in the wrong place.
