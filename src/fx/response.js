@@ -12,6 +12,7 @@
 // one turns up it will be too.
 
 import { makeBiquad, setBiquad, runBiquad } from '../comp/dsp.js';
+import { readingOf, stampOf } from '../read.js';
 
 /** The bands a decay is read in - the three an engineer talks about. */
 export const RESPONSE_BANDS = [
@@ -169,6 +170,37 @@ export function monoOf(impulse) {
   return out;
 }
 
+/**
+ * What a decay profile is indexed by, carried on the reading so it can be
+ * checked.
+ *
+ * `profileDistance` walks `a.length` and has never looked at `b.length`. Two
+ * profiles on different time axes - a different count, a different span - were
+ * silently assumed to line up, and comparing them produced a plausible number
+ * out of points that are not the same points. Nothing carried an axis, so
+ * nothing could have caught it.
+ */
+export const decayAxis = (times = decayTimes()) =>
+  ({ kind: 'time', n: times.length, from: times[1] ?? 0, to: times[times.length - 1] });
+
+/**
+ * A decay, in an envelope.
+ *
+ * The reverb and the delay share this, and they share it on purpose: a room
+ * and a repeat are the same kind of object here, described by what they do to
+ * one click. So they declare the same kind and their readings are genuinely
+ * comparable - which is not a curiosity, it is why "is this delay as long as
+ * that room" is a question this app can answer at all.
+ */
+export function decayReading(tool, profile, { times = decayTimes(), state, source = null } = {}) {
+  return readingOf({
+    tool,
+    kind: 'decay',
+    of: { state: stampOf(state), source, axis: decayAxis(times) },
+    values: profile,
+  });
+}
+
 /** How far apart two rooms are, in decibels of decay. */
 export function profileDistance(mine, theirs) {
   let sum = 0;
@@ -177,13 +209,62 @@ export function profileDistance(mine, theirs) {
   for (const band of RESPONSE_BANDS) {
     const a = mine[band.id];
     const b = theirs[band.id];
-    for (let i = 0; i < a.length; i += 1) {
+    // The shorter of the two, so a mismatch is a short comparison rather than
+    // a walk off the end of one side reading undefined as NaN. Whether a
+    // mismatch should have been compared at all is `comparable`'s question,
+    // and it is asked before this is called.
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i += 1) {
       sum += sq(a[i] - b[i]);
       count += 1;
     }
   }
 
   return Math.sqrt(sum / Math.max(1, count));
+}
+
+/**
+ * How far apart two decays are, and where.
+ *
+ * The number is the same root-mean-square over every band and every moment
+ * that has always been used - it is calibrated, and it stays. What is added is
+ * which band is furthest out, because "1.4 dB out" with no address is a score
+ * rather than a reading.
+ */
+export function decayGap(mine, theirs) {
+  const a = mine.values;
+  const b = theirs.values;
+
+  let worstBand = null;
+  let worstOff = 0;
+
+  for (const band of RESPONSE_BANDS) {
+    let sum = 0;
+    let count = 0;
+    const n = Math.min(a[band.id].length, b[band.id].length);
+    for (let i = 0; i < n; i += 1) {
+      sum += sq(a[band.id][i] - b[band.id][i]);
+      count += 1;
+    }
+    const off = Math.sqrt(sum / Math.max(1, count));
+    if (off > worstOff) { worstOff = off; worstBand = band; }
+  }
+
+  // Which way, in the band that is worst: is yours still going, or already
+  // gone. Averaged over the band rather than taken at a point, because one
+  // moment of a decay is noise and the shape of it is the reading.
+  let bias = 0;
+  if (worstBand) {
+    const n = Math.min(a[worstBand.id].length, b[worstBand.id].length);
+    for (let i = 0; i < n; i += 1) bias += a[worstBand.id][i] - b[worstBand.id][i];
+    bias /= Math.max(1, n);
+  }
+
+  return {
+    off: profileDistance(a, b),
+    where: worstBand ? `the ${worstBand.label.toLowerCase()} band` : null,
+    detail: { band: worstBand?.id ?? null, bandOff: worstOff, longer: bias },
+  };
 }
 
 /**

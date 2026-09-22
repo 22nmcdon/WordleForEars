@@ -1,5 +1,6 @@
 import { VERB_DEFAULTS, makeImpulse, roomProfile } from '../verb/ir.js';
-import { decayCurve, profileDistance, monoOf } from '../fx/response.js';
+import { decayCurve, decayReading, monoOf } from '../fx/response.js';
+import { distance } from '../gap.js';
 import { VerbPlugin, writeSeconds } from '../verb/plugin.js';
 import { LOOP_BEAT } from '../audio.js';
 import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
@@ -182,16 +183,21 @@ export default {
 
     if (exercise === 'tempo') return this.scoreTempo(settings, answer, tier, rate);
 
-    const mine = roomProfile(rate, settings);
-    const theirs = roomProfile(rate, { ...VERB_DEFAULTS, ...answer });
-    const error = profileDistance(mine, theirs);
+    // Readings rather than bare profiles: they carry the time axis they were
+    // measured on, which `profileDistance` used to assume the two of them
+    // shared without either of them recording it.
+    const mine = decayReading('reverb', roomProfile(rate, settings), { state: settings });
+    const wanted = { ...VERB_DEFAULTS, ...answer };
+    const theirs = decayReading('reverb', roomProfile(rate, wanted), { state: wanted });
+    const gap = distance(mine, theirs);
+    const error = gap.off;
 
     const close = VERB_CLOSE.match[tier];
     const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
     // Which way it is out, said in the terms the room is built in.
     const longer = this.decayOf(settings, rate) - this.decayOf({ ...VERB_DEFAULTS, ...answer }, rate);
-    const gap = settings.preDelay - (answer.preDelay ?? VERB_DEFAULTS.preDelay);
+    const ahead = settings.preDelay - (answer.preDelay ?? VERB_DEFAULTS.preDelay);
 
     return {
       correct: error <= close,
@@ -202,14 +208,14 @@ export default {
           state,
           text: error <= close ? 'that is the room'
             : Math.abs(longer) > 0.12 ? `${writeSeconds(Math.abs(longer))} too ${longer > 0 ? 'long' : 'short'}`
-            : Math.abs(gap) > 12 ? `answers ${Math.round(Math.abs(gap))} ms too ${gap > 0 ? 'late' : 'early'}`
+            : Math.abs(ahead) > 12 ? `answers ${Math.round(Math.abs(ahead))} ms too ${ahead > 0 ? 'late' : 'early'}`
             : 'the right length, the wrong room',
         },
       ],
       why: [
         {
           label: 'Decay, compared',
-          value: `${error.toFixed(2)} dB apart`,
+          value: `${error.toFixed(2)} dB apart, worst in ${gap.where}`,
           how: 'Both rooms are built and their decays read in three bands, moment '
              + 'by moment. One reading covers every control at once: the slope is '
              + 'the decay time, the flat part at the start is the pre-delay, the '
@@ -224,7 +230,7 @@ export default {
         },
         {
           label: 'Pre-delay',
-          value: `${Math.round(Math.abs(gap))} ms too ${gap > 0 ? 'late' : 'early'}`,
+          value: `${Math.round(Math.abs(ahead))} ms too ${ahead > 0 ? 'late' : 'early'}`,
           how: 'How long the room waits before it answers. It is what stops a '
              + 'reverb sounding bolted onto the front of the sound.',
         },

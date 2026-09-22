@@ -1,4 +1,5 @@
-import { COMP_DEFAULTS, analyse } from './dsp.js';
+import { COMP_DEFAULTS } from './dsp.js';
+import { reductionPass } from './reading.js';
 import { LiveCompressor } from './node.js';
 
 /**
@@ -116,12 +117,21 @@ export class CompPlayer {
     if (!this.samples) return null;
 
     const rate = this.engine.ctx?.sampleRate ?? 48000;
-    this.reading = analyse(this.samples, rate, this.settings, this.keySamples, this.trace);
-    this.trace = this.reading.gr;
+
+    // The reading is the framed form and the trace is the per-sample one.
+    // Both come out of the same pass, and they were both called "the
+    // reading" until the contract made it necessary to say which was which:
+    // the display draws a quarter of a million points, the scoring compares
+    // frames of five milliseconds, and they are not the same type.
+    const mine = reductionPass(this.samples, rate, this.settings, this.keySamples, this.trace);
+    this.reading = mine.reading;
+    this.trace = mine.trace;
 
     if (this.target) {
-      this.targetReading = analyse(this.samples, rate, this.target, this.keySamples, this.targetTrace);
-      this.targetTrace = this.targetReading.gr;
+      const theirs = reductionPass(
+        this.samples, rate, this.target, this.keySamples, this.targetTrace);
+      this.targetReading = theirs.reading;
+      this.targetTrace = theirs.trace;
     }
 
     this.push();
@@ -133,7 +143,7 @@ export class CompPlayer {
     if (!this.ready) return;
 
     const makeup = (fitted, reading) => (this.auto
-      ? (reading?.makeup ?? 0)
+      ? (reading?.values?.makeup ?? 0)
       : (fitted.makeup ?? 0));
 
     this.mine.set({ ...this.settings, makeup: makeup(this.settings, this.reading) });

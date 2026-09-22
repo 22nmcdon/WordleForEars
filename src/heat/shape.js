@@ -1,5 +1,6 @@
 import { makeBiquad, setBiquad, runBiquad } from '../comp/dsp.js';
 import { fft } from '../fx/fft.js';
+import { readingOf, stampOf } from '../read.js';
 
 // Saturation: what a signal comes out as when the thing it went through was
 // not quite a straight line.
@@ -441,31 +442,71 @@ function foldbackIn(power, bin) {
  * nobody could pick out under the ones either side of it. The floor rides
  * MASKED below the loudest harmonic there is, and never climbs above the
  * absolute one.
+ *
+ * **Pairwise only.** The masking floor is derived from both readings at once -
+ * it rides MASKED below the loudest harmonic in *either* of them - so this is
+ * not a metric and cannot be used to rank three readings against each other.
+ * `heatGap(a, b)` and `heatGap(a, c)` are measured against different floors
+ * and their `off` values are not on the same scale. That is the right
+ * behaviour for the question it answers, and the wrong thing to build a
+ * nearest-neighbour search on.
  */
 export const HEAT_FLOOR = -62;
 export const MASKED = 38;
 
 export function heatGap(mine, theirs) {
-  let worst = { off: 0, where: null, louder: 0 };
+  const a = mine.values ?? mine;
+  const b = theirs.values ?? theirs;
 
   let loudest = -Infinity;
   for (const m of HARMONICS) {
-    if (mine.harmonics[m] > loudest) loudest = mine.harmonics[m];
-    if (theirs.harmonics[m] > loudest) loudest = theirs.harmonics[m];
+    if (a.harmonics[m] > loudest) loudest = a.harmonics[m];
+    if (b.harmonics[m] > loudest) loudest = b.harmonics[m];
   }
   const floor = Math.max(HEAT_FLOOR, loudest - MASKED);
 
+  let off = 0;
+  let which = null;
+  let louder = 0;
+
   for (const m of HARMONICS) {
-    const a = Math.max(mine.harmonics[m], floor);
-    const b = Math.max(theirs.harmonics[m], floor);
-    const off = Math.abs(a - b);
-    if (off > worst.off) worst = { off, where: m, louder: a - b };
+    const mine_m = Math.max(a.harmonics[m], floor);
+    const theirs_m = Math.max(b.harmonics[m], floor);
+    const gap = Math.abs(mine_m - theirs_m);
+    if (gap > off) { off = gap; which = m; louder = mine_m - theirs_m; }
   }
 
-  return worst;
+  // A label, not an index. This used to hand back the number 3 and leave every
+  // caller to turn it into "3rd harmonic" itself, which is how a comparator
+  // ends up with three conventions between four implementations.
+  return {
+    off,
+    where: which === null ? null : `${ordinal(which)} harmonic`,
+    detail: { harmonic: which, louder, thd: a.thd - b.thd },
+  };
 }
 
 export const heatDistance = (mine, theirs) => heatGap(mine, theirs).off;
+
+/** 2nd, 3rd, 4th - how anybody says which harmonic they mean. */
+export function ordinal(n) {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+}
+
+/** What a harmonic reading is indexed by: which harmonics, in order. */
+export const HARMONIC_AXIS = { kind: 'harmonics', ids: HARMONICS };
+
+/** A harmonic series, in an envelope. */
+export function harmonicsReading(rate, settings, { source = null } = {}) {
+  return readingOf({
+    tool: 'saturation',
+    kind: 'harmonics',
+    of: { state: stampOf(settings), source, axis: HARMONIC_AXIS },
+    values: harmonicsOf(rate, settings),
+  });
+}
 
 /**
  * How much of the input range the transfer curve is worth drawing over.

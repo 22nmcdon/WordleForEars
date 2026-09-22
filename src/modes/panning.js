@@ -1,9 +1,10 @@
 import {
-  IMAGE_DEFAULTS, imageOf, imageGap, runImager,
+  IMAGE_DEFAULTS, imageOf, imageReading, runImager,
 } from '../image/field.js';
 import { ImagePlugin } from '../image/plugin.js';
 import { makeBiquad, setBiquad, runBiquad } from '../comp/dsp.js';
 import { mulberry32 } from '../random.js';
+import { distance } from '../gap.js';
 import { HIT, NEAR, MISS, toStep, pick } from './scoring.js';
 
 /**
@@ -206,11 +207,13 @@ export default {
     const exercise = puzzle?.settings?.exercise ?? 'place';
     const settings = { ...IMAGE_DEFAULTS, ...guess, listen: 'stereo' };
     const material = fieldMaterial(puzzle);
-    const mine = imageOf(material.left, material.right, material.rate, settings);
+    // The same envelope the plugin hands back, so the panel's number and this
+    // one are the same measurement rather than two that happen to agree.
+    const mine = imageReading(material.left, material.right, material.rate, settings);
 
-    if (exercise === 'mono') return this.scoreMono(mine, material, tier, settings);
+    if (exercise === 'mono') return this.scoreMono(mine.values, material, tier, settings);
     if (exercise === 'match') return this.scoreMatch(mine, answer, material, tier);
-    return this.scorePlace(mine, answer, material, tier);
+    return this.scorePlace(mine.values, answer, material, tier);
   },
 
   /** Is it in the same place? */
@@ -302,9 +305,9 @@ export default {
 
   /** Is it the same width, band by band? */
   scoreMatch(mine, answer, material, tier) {
-    const theirs = imageOf(material.left, material.right, material.rate,
+    const theirs = imageReading(material.left, material.right, material.rate,
       { ...IMAGE_DEFAULTS, ...answer, listen: 'stereo' });
-    const gap = imageGap(mine, theirs);
+    const gap = distance(mine, theirs);
     const error = gap.off;
 
     const close = IMAGE_CLOSE[tier];
@@ -321,8 +324,8 @@ export default {
           // whole-mix reading would say nothing when one band is in
           // completely the wrong place and the other five are right.
           text: error <= close ? 'that is the image'
-            : gap.where === null ? `sitting too far ${gap.placed > 0 ? 'left' : 'right'}`
-            : `too ${gap.wider > 0 ? 'wide' : 'narrow'} at ${gap.where}`,
+            : gap.where === null ? `sitting too far ${gap.detail.placed > 0 ? 'left' : 'right'}`
+            : `too ${gap.detail.wider > 0 ? 'wide' : 'narrow'} at ${gap.where}`,
         },
       ],
       why: [
@@ -339,8 +342,9 @@ export default {
         {
           label: 'Which way',
           value: gap.where === null
-            ? `sitting ${gap.placed > 0 ? 'left' : 'right'} of centre`
-            : `${Math.abs(gap.wider).toFixed(2)} dB too ${gap.wider > 0 ? 'wide' : 'narrow'}`,
+            ? `sitting ${gap.detail.placed > 0 ? 'left' : 'right'} of centre`
+            : `${Math.abs(gap.detail.wider).toFixed(2)} dB too `
+              + `${gap.detail.wider > 0 ? 'wide' : 'narrow'}`,
           how: 'Width is the side signal against the middle. Too wide and it will '
              + 'not survive being summed; too narrow and the record closes up.',
         },

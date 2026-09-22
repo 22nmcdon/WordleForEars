@@ -1,6 +1,7 @@
 import {
-  IMAGE_DEFAULTS, IMAGE_BANDS, IMAGE_FLOOR, WIDEST, imageOf, widthOf,
+  IMAGE_DEFAULTS, IMAGE_BANDS, IMAGE_FLOOR, IMAGE_AXIS, WIDEST, imageReading, widthOf,
 } from './field.js';
+import { notReady, stampOf } from '../read.js';
 import { ImagePlayer } from './player.js';
 import { dialOf, offDial, sizeOf, readyCanvas } from '../fx/panel.js';
 import { writeHertz } from '../comp/plugin.js';
@@ -75,8 +76,10 @@ export class ImagePlugin {
     this.onChange = onChange;
     this.interactive = true;
     this.target = null;
-    this.profile = null;
-    this.readAt = 0;
+    // One envelope, not a bare profile beside a timestamp that was started
+    // and abandoned. `readAt` was there to answer exactly the question the
+    // envelope now answers, and answered it for nobody.
+    this.reading = null;
 
     this.player = new ImagePlayer(engine, { source });
     this.player.setFault(fault);
@@ -270,8 +273,54 @@ export class ImagePlugin {
 
   measure() {
     const sample = this.player.sample();
-    if (!sample) return;
-    this.profile = imageOf(sample.left, sample.right, sample.rate, this.settings);
+    if (!sample) return null;
+    this.reading = imageReading(sample.left, sample.right, sample.rate, this.settings,
+      { source: this.player.source ?? null });
+    return this.reading;
+  }
+
+  /* ---------- what this is a reading of ---------- */
+
+  /** What the imager is set to. */
+  state() {
+    return { ...this.settings };
+  }
+
+  /**
+   * The image, as measured - synchronously, always, and honest about its age.
+   *
+   * This is the bug the envelope exists for. `changed()` schedules a
+   * measurement a hundred and twenty milliseconds out and then redraws
+   * immediately, so the animation loop painted a live goniometer beside band
+   * bars up to a debounce old, in the same frame, in the same panel,
+   * disagreeing with each other - and a sustained drag kept pushing the
+   * deadline, so the bars could be arbitrarily stale. Neither picture was
+   * wrong; nothing could say which one was current.
+   */
+  read() {
+    const of = {
+      state: stampOf(this.state()),
+      source: this.player.source ?? null,
+      axis: IMAGE_AXIS,
+    };
+
+    if (!this.reading) {
+      this.schedule();
+      return notReady({ tool: 'panning', kind: 'image', of });
+    }
+    if (this.reading.of.state !== of.state) {
+      this.schedule();
+      return { ...this.reading, of, ready: false };
+    }
+    return this.reading;
+  }
+
+  /** The same, but waited for: the material loaded and the bands measured. */
+  async readNow() {
+    await this.player.prepare().catch(() => {});
+    clearTimeout(this.soon);
+    this.measure();
+    return this.read();
   }
 
   syncKnobs() {
@@ -388,12 +437,20 @@ export class ImagePlugin {
       c.fillText(`${db}`, width - 4, y - 3);
     }
 
-    if (!this.profile) return;
+    const reading = this.read();
+    if (!reading.values) return;
+
+    // Dimmed while it is behind, rather than blanked or - as before - drawn
+    // at full strength as though it were current. Blanking would flicker on
+    // every nudge; the bars still have the shape worth seeing, and the label
+    // below says they are catching up.
+    c.globalAlpha = reading.ready ? 1 : 0.4;
+
     const slot = width / IMAGE_BANDS.length;
     const bar = Math.min(26, slot * 0.5);
 
     IMAGE_BANDS.forEach((band, i) => {
-      const read = this.profile.bands[band.id];
+      const read = reading.values.bands[band.id];
       const x = bandX(i, width);
       const top = widthY(read.width, height);
       const base = widthY(IMAGE_FLOOR, height);
@@ -421,25 +478,30 @@ export class ImagePlugin {
 
     c.fillStyle = ink.soft;
     c.textAlign = 'left';
-    c.fillText('width by band · green agrees, red argues', 6, 12);
+    c.fillText(reading.ready
+      ? 'width by band · green agrees, red argues'
+      : 'width by band · measuring…', 6, 12);
+    c.globalAlpha = 1;
   }
 
   writeReadout() {
     const trim = this.el.querySelector('#imageTrim');
     if (!trim) return;
 
-    if (this.profile) {
-      const { correlation, mono } = this.profile.whole;
+    const reading = this.read();
+
+    if (reading.values && reading.ready) {
+      const { correlation, mono } = reading.values.whole;
       trim.textContent = `correlation ${correlation.toFixed(2)} · mono costs ${Math.abs(mono).toFixed(1)} dB`;
     } else {
-      trim.textContent = '';
+      trim.textContent = reading.values ? 'measuring…' : '';
     }
 
     const parts = [
       `${Math.round(this.settings.low * 100)} / ${Math.round(this.settings.mid * 100)} / `
       + `${Math.round(this.settings.high * 100)}%`,
     ];
-    if (this.profile) parts.push(`${this.profile.whole.width.toFixed(1)} dB wide`);
+    if (reading.values && reading.ready) parts.push(`${reading.values.whole.width.toFixed(1)} dB wide`);
     if (this.settings.listen !== 'stereo') parts.push(`${this.settings.listen} only`);
 
     this.el.querySelector('#imageRead').textContent = parts.join(' · ');
@@ -453,7 +515,15 @@ export class ImagePlugin {
 
   showTarget(target) {
     const sample = this.player.sample();
-    if (sample) this.target = imageOf(sample.left, sample.right, sample.rate, target);
+    if (sample) {
+      this.target = imageReading(sample.left, sample.right, sample.rate, target).values;
+    }
+    this.draw();
+  }
+
+  /** Take the drawn target back off. */
+  clearTarget() {
+    this.target = null;
     this.draw();
   }
 

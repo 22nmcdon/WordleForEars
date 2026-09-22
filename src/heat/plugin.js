@@ -1,7 +1,8 @@
 import {
-  HEAT_DEFAULTS, HARMONICS, HEAT_FLOOR, LEAST_TONE, MOST_TONE,
-  MOST_DRIVE, MOST_HARDNESS, harmonicsOf, transferCurve,
+  HEAT_DEFAULTS, HARMONICS, HEAT_FLOOR, HARMONIC_AXIS, LEAST_TONE, MOST_TONE,
+  MOST_DRIVE, MOST_HARDNESS, harmonicsOf, harmonicsReading, transferCurve,
 } from './shape.js';
+import { notReady, stampOf } from '../read.js';
 import { HeatPlayer } from './player.js';
 import { dialOf, offDial, readyCanvas } from '../fx/panel.js';
 import { writeHertz } from '../comp/plugin.js';
@@ -105,7 +106,7 @@ export class HeatPlugin {
     this.onChange = onChange;
     this.interactive = true;
     this.target = null;
-    this.profile = null;
+    this.reading = null;
 
     this.player = new HeatPlayer(engine, { source });
     this.player.setFault(fault);
@@ -315,7 +316,51 @@ export class HeatPlugin {
 
   measure() {
     const rate = this.engine?.ctx?.sampleRate ?? 48000;
-    this.profile = harmonicsOf(rate, this.settings);
+    this.reading = harmonicsReading(rate, this.settings, { source: this.player.source ?? null });
+    return this.reading;
+  }
+
+  /* ---------- what this is a reading of ---------- */
+
+  /** What the saturator is set to. */
+  state() {
+    return { ...this.settings };
+  }
+
+  /**
+   * The harmonic series these settings make - synchronously, always.
+   *
+   * The second of the three bugs the envelope exists for. `schedule()` defers
+   * the measurement a hundred and ten milliseconds and the curve redraws at
+   * once, so the transfer curve bent live while the bars underneath it still
+   * showed the previous settings' harmonics - under a doc comment promising
+   * that "the curve and the bars redraw instantly". The curve did. The bars
+   * did not, and nothing could tell them apart.
+   */
+  read() {
+    const of = {
+      state: stampOf(this.state()),
+      source: this.player.source ?? null,
+      axis: HARMONIC_AXIS,
+    };
+
+    if (!this.reading) {
+      this.schedule();
+      return notReady({ tool: 'saturation', kind: 'harmonics', of });
+    }
+    if (this.reading.of.state !== of.state) {
+      this.schedule();
+      return { ...this.reading, of, ready: false };
+    }
+    return this.reading;
+  }
+
+  /** The same, but waited for. */
+  async readNow() {
+    clearTimeout(this.soon);
+    this.player.setSettings(this.settings);
+    this.measure();
+    return this.read();
   }
 
   syncKnobs() {
@@ -441,18 +486,26 @@ export class HeatPlugin {
       c.fillText(`${db}`, width - 4, y - 3);
     }
 
-    if (!this.profile) return;
+    const reading = this.read();
+    if (!reading.values) return;
+
+    // Dimmed while it is behind. The curve beside these is arithmetic and is
+    // always current; measuring the series is fifty-odd milliseconds and is
+    // not. Saying so is the whole fix - the bars are still worth seeing, they
+    // are just not a reading of what is on the knobs this instant.
+    const behind = !reading.ready;
+
     const slot = width / HARMONICS.length;
     const bar = Math.min(26, slot * 0.52);
     const base = barY(HEAT_FLOOR, height);
 
     HARMONICS.forEach((m, i) => {
-      const level = Math.max(HEAT_FLOOR, this.profile.harmonics[m]);
+      const level = Math.max(HEAT_FLOOR, reading.values.harmonics[m]);
       const x = barX(i, width);
       const top = barY(level, height);
 
       c.fillStyle = m % 2 === 0 ? ink.gold : ink.blush;
-      c.globalAlpha = 0.8;
+      c.globalAlpha = behind ? 0.32 : 0.8;
       c.fillRect(x - bar / 2, top, bar, Math.max(1, base - top));
       c.globalAlpha = 1;
 
@@ -474,7 +527,9 @@ export class HeatPlugin {
 
     c.fillStyle = ink.soft;
     c.textAlign = 'left';
-    c.fillText('harmonics · gold is even, pink is odd', 6, 12);
+    c.fillText(behind
+      ? 'harmonics · measuring…'
+      : 'harmonics · gold is even, pink is odd', 6, 12);
   }
 
   writeReadout() {
@@ -487,13 +542,16 @@ export class HeatPlugin {
     }
 
     const parts = [];
-    if (this.profile) {
-      parts.push(`${this.profile.thd.toFixed(1)} dB of harmonics`);
-      const tilt = this.profile.even - this.profile.odd;
-      if (this.profile.even < HEAT_FLOOR) parts.push('odd only');
+    const reading = this.read();
+    if (reading.values && reading.ready) {
+      parts.push(`${reading.values.thd.toFixed(1)} dB of harmonics`);
+      const tilt = reading.values.even - reading.values.odd;
+      if (reading.values.even < HEAT_FLOOR) parts.push('odd only');
       else if (tilt > 3) parts.push('even-led');
       else if (tilt < -3) parts.push('odd-led');
       else parts.push('even and odd together');
+    } else if (reading.values) {
+      parts.push('measuring…');
     }
     if (this.settings.listen === 'diff') parts.push('hearing the difference only');
 

@@ -10,6 +10,9 @@
 // one is checked against `BiquadFilterNode.getFrequencyResponse` to a
 // hundredth of a decibel.
 
+
+import { readingOf, stampOf } from '../read.js';
+
 /**
  * What each kind of band has, and what its handle means vertically.
  *
@@ -194,6 +197,74 @@ export function bandGainAt(band, frequency, rate) {
 export function contributionOf(band, rate = 48000) {
   if (band.on === false) return 0;
   return bandGainAt(band, band.frequency, rate);
+}
+
+/**
+ * The frequencies a curve is read at: where the ear is, at the spacing the ear
+ * hears.
+ *
+ * Below 30 and above 16k there is little to hear and a great deal of room to
+ * be wrong in, which would flatter or punish a guess for nothing.
+ *
+ * This lived in the EQ exercise, which was the only thing that read a curve.
+ * Now the plugin reads one too, and the two have to be on the same axis or
+ * comparing them is arithmetic over a coincidence.
+ */
+export const JUDGED_HZ = logFrequencies(96, 30, 16000);
+
+/** What a curve is indexed by, carried on the reading so it can be checked. */
+export const CURVE_AXIS = { kind: 'hz', n: 96, from: 30, to: 16000 };
+
+/**
+ * A curve, in an envelope.
+ *
+ * The EQ used to cache nothing at all - `curveOf` ran three times per frame,
+ * which is cheap enough that nobody noticed and is still three answers to one
+ * question with nothing saying they agree. This is the one answer.
+ */
+export function curveReading(bands, rate = 48000, { source = null } = {}) {
+  return readingOf({
+    tool: 'eq',
+    kind: 'curve',
+    of: { state: stampOf(bands), source, axis: CURVE_AXIS },
+    values: curveOf(bands, JUDGED_HZ, rate),
+  });
+}
+
+/**
+ * How far two curves are apart, at their worst point.
+ *
+ * The worst point rather than the average: averaged across the spectrum a
+ * single band is a small part of a wide range, so doing nothing at all
+ * measured about two decibels and very nearly passed. What "matched" means to
+ * anybody looking at two curves is that they sit on each other everywhere,
+ * which is exactly what the largest gap between them measures.
+ *
+ * This was inside the EQ exercise's `score`, taking two sets of bands and
+ * building both curves itself. Taking readings instead means the same
+ * comparison works between anything that produces a curve - a guess against an
+ * answer, yours against a reference, this chain against that one.
+ */
+export function curveGap(mine, theirs) {
+  const a = mine.values;
+  const b = theirs.values;
+
+  let worst = 0;
+  let worstAt = 0;
+
+  for (let i = 0; i < a.length; i += 1) {
+    const off = a[i] - b[i];
+    if (Math.abs(off) > Math.abs(worst)) {
+      worst = off;
+      worstAt = JUDGED_HZ[i];
+    }
+  }
+
+  return {
+    off: Math.abs(worst),
+    where: worstAt ? writeHz(worstAt) : null,
+    detail: { hz: worstAt, louder: worst },
+  };
 }
 
 export function curveOf(bands, frequencies, rate = 48000) {

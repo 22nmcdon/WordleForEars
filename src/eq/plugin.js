@@ -1,8 +1,9 @@
 import {
   BAND_TYPES, SLOPES, RESTING_Q, FLAT_CORNER,
-  averageLift, contributionOf, curveOf, logFrequencies, shortHz, exactHz,
+  averageLift, contributionOf, curveOf, curveReading, logFrequencies, shortHz, exactHz,
 } from './filters.js';
 import { EQPlayer } from './player.js';
+import { stampOf } from '../read.js';
 
 const LOW = 20;
 const HIGH = 20000;
@@ -906,6 +907,39 @@ export class EQPlugin {
   /** The other side of the A/B, named for what it actually is. */
   nameOther(label) {
     this.el.querySelector('#eqOther').textContent = label;
+  }
+
+  /* ---------- what this is a reading of ---------- */
+
+  /** What the strip is set to. Copied, so a caller cannot move it by holding it. */
+  state() {
+    return this.bands.map((band) => ({ ...band }));
+  }
+
+  /**
+   * The curve, in an envelope.
+   *
+   * Memoised on the settings it was taken of, which is the first time the EQ
+   * has cached anything at all - `curveOf` ran three times per frame on the
+   * display and twice more in the scoring, five answers to one question with
+   * nothing asserting they agreed. Cheap enough that nobody noticed, and that
+   * is not the same as correct.
+   *
+   * The display keeps recomputing per frame at whatever resolution the canvas
+   * is: that is a picture, at a different number of points, and it is not this.
+   */
+  read() {
+    const state = stampOf(this.state());
+    if (!this.reading || this.reading.of.state !== state) {
+      this.reading = curveReading(this.state(), this.rate(),
+        { source: this.player?.source ?? null });
+    }
+    return this.reading;
+  }
+
+  /** The curve needs no material and no waiting, so this is the same answer. */
+  async readNow() {
+    return this.read();
   }
 
   lock() {

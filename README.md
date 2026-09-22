@@ -173,6 +173,39 @@ what to say when somebody is stuck (`hints`), and what the answer was
 (`reveal`, `weak`). Nothing else in the app knows which mode is showing — the
 log, the picker and the stats are all built from what the mode returns.
 
+### Readings
+
+Every measurement in this app arrives in one envelope:
+
+```js
+{ tool: 'panning', kind: 'image', ready: true,
+  of: { state, source, axis },      // WHAT this is a reading of
+  values: <the tool's own shape, verbatim> }
+```
+
+The payloads are **not** unified — they are calibrated and tested, and
+translating an EQ curve, a gain-reduction series and a harmonic spectrum into
+one shape would be lossy for no gain. What is unified is the envelope and the
+operations: `read()` (synchronous, never null, `ready: false` when the controls
+have moved since), `readNow()` (awaited, guaranteed current), and
+`distance(a, b)` (`src/gap.js`), which refuses to compare two readings of
+different kinds, on different axes, or over different material rather than
+returning a plausible number nothing downstream could question.
+
+Five kinds across six tools: `curve`, `reduction`, `decay`, `image`,
+`harmonics`. The reverb and the delay share `decay` on purpose — each is
+completely described by what it does to one click, so "is this delay as long as
+that room" is a question that can be asked. `distance` on `harmonics` is
+pairwise only: its masking floor is derived from both readings at once, so
+three of them cannot be ranked.
+
+`of.state` is what fixed three bugs that were shipping: the imager painted a
+live goniometer beside band bars up to a debounce old *in the same frame*, the
+saturator did the same with its curve and its harmonics under a comment
+promising they redrew together, and the compressor went on drawing a
+gain-reduction trace for a loop that was no longer loaded. Nothing was wrong
+with any of the arithmetic; nothing could say which picture was current.
+
 A `score` may also return `why`: an ordered list of `{label, value, how}`, shown
 under the attempt in the log. Every scorer here already worked out more than
 the two cells it printed — the frequency two curves part company at, how much
@@ -235,6 +268,8 @@ src/echo/ heat/
 src/fx/             what more than one tool needs: FFT, impulse response
                     reading, the shared panel furniture, worklet stringifying
 src/notes/          what each tool is for, in prose, for the person using it
+src/read.js         the reading envelope: what a measurement is, and of what
+src/gap.js          comparing two readings without knowing their kind
 src/bench/          the workbench shell - the picker, the attempt log
 src/modes/          one file per exercise set, plus the shared scoring vocabulary
 src/random.js       seeded PRNG + daily numbering

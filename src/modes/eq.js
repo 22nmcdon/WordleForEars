@@ -1,4 +1,5 @@
-import { newStrip, curveOf, logFrequencies, writeHz } from '../eq/filters.js';
+import { newStrip, curveReading, writeHz } from '../eq/filters.js';
+import { distance } from '../gap.js';
 import { EQPlugin } from '../eq/plugin.js';
 import { HIT, NEAR, MISS, logPick, toStep, toThirdOctave, pick } from './scoring.js';
 
@@ -11,13 +12,6 @@ const TROUBLE = [
   { low: 1200, high: 2500, name: 'honk' },
   { low: 3000, high: 6500, name: 'harshness' },
 ];
-
-/**
- * The frequencies a curve is judged on: where the ear is, at the spacing the
- * ear hears. Below 30 and above 16k there is little to hear and a great deal
- * of room to be wrong in, which would flatter or punish a guess for nothing.
- */
-const JUDGED = logFrequencies(96, 30, 16000);
 
 /**
  * How far the two curves may part company, at their worst point, and still
@@ -132,21 +126,15 @@ export default {
    */
   score(guess, answer, tier) {
     const rate = 48000;
-    const mine = curveOf(guess, JUDGED, rate);
-    const theirs = curveOf(answer, JUDGED, rate);
+    // Readings rather than bare curves. The EQ cached nothing at all before
+    // this - `curveOf` ran three times a frame on the display and twice more
+    // here, which is five answers to one question with nothing saying they
+    // agree. Now the plugin and the scorer ask the same way.
+    const gap = distance(curveReading(guess, rate), curveReading(answer, rate));
+    const worst = gap.detail.louder;
+    const worstAt = gap.detail.hz;
 
-    let worst = 0;
-    let worstAt = 0;
-
-    for (let i = 0; i < JUDGED.length; i += 1) {
-      const off = mine[i] - theirs[i];
-      if (Math.abs(off) > Math.abs(worst)) {
-        worst = off;
-        worstAt = JUDGED[i];
-      }
-    }
-
-    const error = Math.abs(worst);
+    const error = gap.off;
     const close = CLOSE_ENOUGH[tier];
     const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 

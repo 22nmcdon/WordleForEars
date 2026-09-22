@@ -210,8 +210,14 @@ test('the gap is the worst harmonic, and names it', () => {
   const mine = harmonicsOf(rate, { ...HEAT_DEFAULTS, drive: 16, bias: 0 });
   const gap = heatGap(mine, theirs);
   // No bias against a biased target: the even harmonics are what is missing.
-  assert.ok(gap.where % 2 === 0, `worst harmonic was the ${gap.where}`);
-  assert.ok(gap.louder < 0, 'and there should be too little of it');
+  assert.ok(gap.detail.harmonic % 2 === 0, `worst harmonic was the ${gap.where}`);
+  assert.ok(gap.detail.louder < 0, 'and there should be too little of it');
+
+  // And it says which one in words rather than handing back a number for the
+  // caller to phrase. Three of the four comparators here had their own
+  // convention for this; now none of them do.
+  assert.equal(gap.where, `${gap.detail.harmonic}${gap.detail.harmonic === 2 ? 'nd' : 'th'} harmonic`);
+  assert.equal(heatGap(theirs, theirs).where, null, 'nothing stands out against itself');
 });
 
 /* --- the mode -------------------------------------------------------------- */

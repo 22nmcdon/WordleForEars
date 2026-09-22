@@ -1,4 +1,4 @@
-import { HEAT_DEFAULTS, harmonicsOf, heatTrim, runShaper } from './shape.js';
+import { HEAT_DEFAULTS, heatTrim, runShaper } from './shape.js';
 import { LiveSaturator } from './node.js';
 
 /**
@@ -104,16 +104,22 @@ export class HeatPlayer {
   measure() {
     const rate = this.engine.ctx?.sampleRate ?? 48000;
 
-    this.reading = harmonicsOf(rate, this.settings);
-    this.targetReading = this.target ? harmonicsOf(rate, this.target) : null;
-
+    // The harmonic series is not measured here any more. It used to be -
+    // twice, once for each side - in the same timeout body that had the
+    // plugin measure it again, with no ordering expressed anywhere between
+    // them, and with nothing at all reading what this stored. Three passes of
+    // the most expensive measurement in the app, two of them for nobody.
+    //
+    // What is genuinely this player's is the trim: how much gain each side
+    // needs to come out as loud as it went in, which is measured over the
+    // actual loop rather than off the curve. The plugin owns the reading.
     if (this.samples) {
       this.trim = heatTrim(this.samples, rate, this.settings);
       this.targetTrim = this.target ? heatTrim(this.samples, rate, this.target) : 0;
     }
 
     this.push();
-    return this.reading;
+    return this.trim;
   }
 
   /** Hands the current settings, and the level they need, to the audio thread. */

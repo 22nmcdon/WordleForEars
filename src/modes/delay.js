@@ -3,7 +3,8 @@ import {
   echoProfile, timeOf, nearestDivision,
 } from '../echo/line.js';
 import { EchoPlugin } from '../echo/plugin.js';
-import { profileDistance } from '../fx/response.js';
+import { decayReading } from '../fx/response.js';
+import { distance } from '../gap.js';
 import { writeMs } from '../fx/panel.js';
 import { LOOP_BEAT } from '../audio.js';
 import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
@@ -152,7 +153,13 @@ export default {
     if (exercise === 'find') return this.scoreFind(settings, answer, tier);
 
     const wanted = { ...ECHO_DEFAULTS, ...answer };
-    const error = profileDistance(echoProfile(rate, settings), echoProfile(rate, wanted));
+    // The same kind of reading the reverb takes, on purpose: a room and a
+    // repeat are the same sort of object here, so "is this delay as long as
+    // that room" is a question that can be asked at all.
+    const mine = decayReading('delay', echoProfile(rate, settings), { state: settings });
+    const theirs = decayReading('delay', echoProfile(rate, wanted), { state: wanted });
+    const gap = distance(mine, theirs);
+    const error = gap.off;
 
     const close = ECHO_CLOSE[tier];
     const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
@@ -177,7 +184,7 @@ export default {
       why: [
         {
           label: 'Repeats, compared',
-          value: `${error.toFixed(2)} dB apart`,
+          value: `${error.toFixed(2)} dB apart, worst in ${gap.where}`,
           how: 'Both delays are built and their repeats read in three bands over '
              + 'time - where each echo lands, how loud it is, and what the tone '
              + 'control has taken off it by then. Built from numbers rather than '

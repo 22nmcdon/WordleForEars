@@ -1,6 +1,8 @@
 import { staticGain, COMP_DEFAULTS } from './dsp.js';
 import { CompPlayer } from './player.js';
 import { dialOf, offDial, sizeOf, readyCanvas } from '../fx/panel.js';
+import { FRAME_MS, materialStamp } from './reading.js';
+import { notReady, stampOf } from '../read.js';
 
 /**
  * The compressor, as a plugin you work rather than a question you answer.
@@ -424,7 +426,12 @@ export class CompPlugin {
     const { width } = sizeOf(this.trace);
     const gr = this.player.trace;
     const samples = this.player.samples;
-    if (!width || !gr || !samples) return;
+    // Cleared, not left. This returned early without touching `this.columns`,
+    // so after an awaited source change the animation loop went on drawing a
+    // gain-reduction trace - and printing "N dB deepest" beside it - for a
+    // loop that was no longer loaded. Nothing was wrong with the arithmetic;
+    // it was arithmetic about audio that had gone.
+    if (!width || !gr || !samples) { this.columns = null; return; }
 
     const columns = Math.max(1, Math.round(width));
     const deepest = new Float32Array(columns);
@@ -584,6 +591,14 @@ export class CompPlugin {
       c.fillText(`${db}`, width - 4, y - 3);
     }
 
+    // Nothing loaded means nothing to have a trace of. Clearing this inside
+    // `restage` is necessary and not sufficient: a source change sets the
+    // samples to null and then awaits a render, and nothing calls `restage`
+    // until that resolves - while the animation loop, which does not stop for
+    // a source change, goes on drawing the old loop's reduction over the new
+    // loop's silence. This is where it is noticed, because this is the only
+    // thing running.
+    if (!this.player.samples) this.columns = null;
     if (!this.columns) return;
     const { deepest, loudest, width: columns } = this.columns;
     const span = width / columns;
@@ -666,14 +681,55 @@ export class CompPlugin {
     });
   }
 
+  /* ---------- what this is a reading of ---------- */
+
+  /** What the compressor is set to. */
+  state() {
+    return { ...this.settings };
+  }
+
+  /**
+   * What these settings do to this loop - synchronously, always.
+   *
+   * Never null, and never a stale value passed off as a current one. If the
+   * material has not loaded, or the settings have moved since the last pass,
+   * what comes back carries `ready: false` and whatever the last pass found,
+   * and a recomputation is scheduled. A caller that has to branch on null
+   * before it can ask what tool it is holding will get that branch wrong once.
+   */
+  read() {
+    const of = {
+      state: stampOf(this.state()),
+      source: this.player.source ?? null,
+      axis: { kind: 'frames', ms: FRAME_MS, rate: this.engine?.ctx?.sampleRate ?? 48000,
+              over: materialStamp(this.player.samples) },
+    };
+
+    if (!this.player.samples) return notReady({ tool: 'compression', kind: 'reduction', of });
+    if (!this.player.reading) { this.player.measure(); }
+    if (!this.player.reading) return notReady({ tool: 'compression', kind: 'reduction', of });
+
+    const current = this.player.reading.of.state === of.state
+      && this.player.reading.of.axis.over === of.axis.over;
+    return current ? this.player.reading : { ...this.player.reading, of, ready: false };
+  }
+
+  /** The same, but waited for: the material loaded and the pass run. */
+  async readNow() {
+    await this.player.prepare().catch(() => {});
+    this.player.measure();
+    this.restage();
+    return this.read();
+  }
+
   writeReadout() {
-    const reading = this.player.reading;
+    const reading = this.read();
     const trim = this.el.querySelector('#compTrim');
 
-    if (this.player.auto && reading) {
-      trim.textContent = Math.abs(reading.makeup) < 0.1
+    if (this.player.auto && reading.values) {
+      trim.textContent = Math.abs(reading.values.makeup) < 0.1
         ? 'auto gain · none'
-        : `auto gain · ${writeDbValue(reading.makeup)}`;
+        : `auto gain · ${writeDbValue(reading.values.makeup)}`;
     } else {
       trim.textContent = 'auto gain · off';
     }
@@ -683,7 +739,14 @@ export class CompPlugin {
       `${writeRatio(ratio)} over ${threshold.toFixed(1)} dB`,
       `${writeTime(attack)} / ${writeTime(release)}`,
     ];
-    if (reading) parts.push(`${reading.deepest.toFixed(1)} dB deepest`);
+    // Only when it is a reading of what is on the knobs now. Saying "6.2 dB
+    // deepest" beside settings that have moved since is the same class of
+    // untruth as saying it about a loop that is no longer loaded.
+    if (reading.values) {
+      parts.push(reading.ready
+        ? `${reading.values.deepest.toFixed(1)} dB deepest`
+        : 'measuring…');
+    }
     if (this.settings.sidechain) parts.push('keyed');
     this.el.querySelector('#compRead').textContent = parts.join(' · ');
   }

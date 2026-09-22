@@ -1,8 +1,9 @@
 import {
   HEAT_DEFAULTS, HEAT_FLOOR, MOST_TONE, MOST_HARDNESS,
-  harmonicsOf, heatGap,
+  harmonicsReading,
 } from '../heat/shape.js';
 import { HeatPlugin } from '../heat/plugin.js';
+import { distance } from '../gap.js';
 import { HIT, NEAR, MISS, toStep } from './scoring.js';
 
 /**
@@ -47,9 +48,6 @@ const EVEN_LEAD = { easy: 3, medium: 5, hard: 7 };
 
 const writeEven = (db) => `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`;
 
-/** Second, third, fourth - said the way anybody names a harmonic. */
-const ORDINALS = ['', '', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'];
-const ordinal = (n) => ORDINALS[n] ?? `${n}th`;
 
 export default {
   id: 'saturation',
@@ -170,13 +168,16 @@ export default {
   score(guess, answer, tier, puzzle) {
     const exercise = puzzle?.settings?.exercise ?? 'amount';
     const rate = puzzle?.rate ?? 48000;
-    const mine = harmonicsOf(rate, { ...HEAT_DEFAULTS, ...guess, listen: 'out' });
+    // Readings, not raw series: the same envelope the plugin hands back, so
+    // the number printed here and the number the panel shows are the same
+    // measurement rather than two that happen to agree.
+    const mine = harmonicsReading(rate, { ...HEAT_DEFAULTS, ...guess, listen: 'out' });
 
-    if (exercise === 'even') return this.scoreEven(mine, puzzle, tier);
+    if (exercise === 'even') return this.scoreEven(mine.values, puzzle, tier);
 
-    const theirs = harmonicsOf(rate, { ...HEAT_DEFAULTS, ...answer, listen: 'out' });
+    const theirs = harmonicsReading(rate, { ...HEAT_DEFAULTS, ...answer, listen: 'out' });
     if (exercise === 'match') return this.scoreColour(mine, theirs, tier);
-    return this.scoreAmount(mine, theirs, tier);
+    return this.scoreAmount(mine.values, theirs.values, tier);
   },
 
   /** Is it pushed as hard? */
@@ -225,8 +226,10 @@ export default {
   },
 
   /** Is it the same colour, harmonic by harmonic? */
-  scoreColour(mine, theirs, tier) {
-    const gap = heatGap(mine, theirs);
+  scoreColour(mineRead, theirsRead, tier) {
+    const mine = mineRead.values;
+    const theirs = theirsRead.values;
+    const gap = distance(mineRead, theirsRead);
     const close = COLOUR_CLOSE[tier];
     const state = gap.off <= close ? HIT : gap.off <= close * 2 ? NEAR : MISS;
 
@@ -241,15 +244,15 @@ export default {
           // average over nine of them says nothing when one is in completely
           // the wrong place and the other eight are right.
           text: gap.off <= close ? 'that is the colour'
-            : `${Math.abs(gap.louder).toFixed(1)} dB too ${gap.louder > 0 ? 'much' : 'little'} `
-              + `${ordinal(gap.where)} harmonic`,
+            : `${Math.abs(gap.detail.louder).toFixed(1)} dB too `
+              + `${gap.detail.louder > 0 ? 'much' : 'little'} ${gap.where}`,
         },
       ],
       why: [
         {
           label: 'Worst harmonic',
           value: gap.where === null ? 'none of them stands out'
-               : `the ${ordinal(gap.where)}, ${gap.off.toFixed(2)} dB out`,
+               : `the ${gap.where}, ${gap.off.toFixed(2)} dB out`,
           how: 'The harmonics are read one by one up to the tenth, and this is '
              + 'the one furthest from the target. The worst rather than the '
              + 'average, because an average over nine says nothing when one is in '

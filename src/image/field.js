@@ -1,5 +1,6 @@
 import { makeBiquad, setBiquad, runBiquad } from '../comp/dsp.js';
 import { bandOf } from '../fx/response.js';
+import { readingOf, stampOf } from '../read.js';
 
 // The stereo field, as arithmetic.
 //
@@ -269,17 +270,46 @@ export function imageOf(left, right, rate, settings) {
  * room is not a detail either.
  */
 export function imageGap(mine, theirs) {
-  let worst = { off: 0, where: null, wider: 0 };
+  const a = mine.values ?? mine;
+  const b = theirs.values ?? theirs;
+
+  let off = 0;
+  let where = null;
+  let detail = { wider: 0, placed: 0 };
 
   for (const band of IMAGE_BANDS) {
-    const wider = mine.bands[band.id].width - theirs.bands[band.id].width;
-    if (Math.abs(wider) > worst.off) worst = { off: Math.abs(wider), where: band.label, wider };
+    const wider = a.bands[band.id].width - b.bands[band.id].width;
+    if (Math.abs(wider) > off) {
+      off = Math.abs(wider);
+      where = `${band.label} Hz`;
+      detail = { wider, placed: 0 };
+    }
   }
 
-  const placed = mine.whole.balance - theirs.whole.balance;
-  if (Math.abs(placed) > worst.off) worst = { off: Math.abs(placed), where: null, wider: 0, placed };
+  const placed = a.whole.balance - b.whole.balance;
+  if (Math.abs(placed) > off) {
+    off = Math.abs(placed);
+    // Null, and it means something: the whole image is in the wrong place
+    // rather than one band being the wrong width. Every other kind of reading
+    // here uses null for "no single address", and this is that.
+    where = null;
+    detail = { wider: 0, placed };
+  }
 
-  return worst;
+  return { off, where, detail };
 }
 
 export const imageDistance = (mine, theirs) => imageGap(mine, theirs).off;
+
+/** What a stereo image is indexed by: the six bands, in order. */
+export const IMAGE_AXIS = { kind: 'bands', ids: IMAGE_BANDS.map((band) => band.id) };
+
+/** An image, in an envelope. */
+export function imageReading(left, right, rate, settings, { source = null } = {}) {
+  return readingOf({
+    tool: 'panning',
+    kind: 'image',
+    of: { state: stampOf(settings), source, axis: IMAGE_AXIS },
+    values: imageOf(left, right, rate, settings),
+  });
+}

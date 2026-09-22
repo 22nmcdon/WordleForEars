@@ -1,4 +1,6 @@
-import { COMP_DEFAULTS, analyse, runCompressor, meanFrames } from '../comp/dsp.js';
+import { COMP_DEFAULTS, analyse, runCompressor } from '../comp/dsp.js';
+import { reductionReading } from '../comp/reading.js';
+import { distance } from '../gap.js';
 import { CompPlugin, writeTime, writeRatio } from '../comp/plugin.js';
 import { HIT, NEAR, MISS, logPick, toStep } from './scoring.js';
 
@@ -326,23 +328,17 @@ export default {
    */
   scoreMatch(guess, answer, material, tier) {
     const { samples, rate, key } = material;
-    const mine = meanFrames(analyse(samples, rate, guess, key).gr, rate);
-    const theirs = meanFrames(analyse(samples, rate, answer, key).gr, rate);
+    // The reading is the framed form, and the framing is the reading's rather
+    // than this function's. What used to be here took two settings objects,
+    // ran both passes, framed both results and compared them - five steps of
+    // which only the last is about marking a guess.
+    const gap = distance(
+      reductionReading(samples, rate, guess, key),
+      reductionReading(samples, rate, answer, key),
+    );
 
-    let sum = 0;
-    let bias = 0;
-    for (let i = 0; i < mine.length; i += 1) {
-      const off = mine[i] - theirs[i];
-      sum += off * off;
-      bias += off;
-    }
-
-    const error = Math.sqrt(sum / mine.length);
-    const depth = bias / mine.length;
-    // What is left once the depth is right: the part that is timing rather
-    // than amount, which is the half people find hard to hear.
-    const shape = Math.sqrt(Math.max(0, error * error - depth * depth));
-
+    const error = gap.off;
+    const { depth, shape } = gap.detail;
     const close = COMP_CLOSE.match[tier];
     const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 

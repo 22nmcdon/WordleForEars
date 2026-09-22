@@ -3,9 +3,10 @@ import {
   makeEcho, timeOf, nearestDivision,
 } from './line.js';
 import {
-  RESPONSE_BANDS, DECAY_FLOOR, decayProfile, decayTimes, wetDryImpulse,
+  RESPONSE_BANDS, DECAY_FLOOR, decayProfile, decayTimes, wetDryImpulse, decayReading, decayAxis
 } from '../fx/response.js';
 import { ImpulsePlayer } from '../fx/player.js';
+import { notReady, stampOf } from '../read.js';
 import { dialOf, offDial, sizeOf, readyCanvas, decayX, decayY, writeMs } from '../fx/panel.js';
 import { LOOP_BEAT } from '../audio.js';
 import { writeHertz } from '../comp/plugin.js';
@@ -519,6 +520,44 @@ export class EchoPlugin {
 
   nameOther(label) {
     this.el.querySelector('#echoOther').textContent = label;
+  }
+
+  /* ---------- what this is a reading of ---------- */
+
+  /** What the delay is set to. */
+  state() {
+    return { ...this.settings };
+  }
+
+  /**
+   * How it decays, band by band, in an envelope.
+   *
+   * The reverb and the delay declare the same kind on purpose. A room and a
+   * repeat are the same sort of object here - each is completely described by
+   * what it does to one click - so their readings are genuinely comparable,
+   * and "is this delay as long as that room" is a question that can be asked.
+   *
+   * No debounce and no staleness to report: `restage` rebuilds this on every
+   * change, synchronously, because it is arithmetic over an impulse rather
+   * than a pass over audio. The envelope still carries the axis, which is what
+   * `profileDistance` spent its whole life assuming without a record of.
+   */
+  read() {
+    const of = {
+      state: stampOf(this.state()),
+      source: null,
+      axis: decayAxis(this.times ?? undefined),
+    };
+
+    if (!this.profile) return notReady({ tool: 'delay', kind: 'decay', of });
+    return decayReading('delay', this.profile,
+      { times: this.times, state: this.state() });
+  }
+
+  /** Nothing to wait for: the profile is rebuilt on every change. */
+  async readNow() {
+    this.restage();
+    return this.read();
   }
 
   lock() {
