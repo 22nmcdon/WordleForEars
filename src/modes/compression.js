@@ -358,6 +358,32 @@ export default {
             : 'right depth, wrong timing',
         },
       ],
+      why: [
+        {
+          label: 'Reduction, compared',
+          value: `${error.toFixed(2)} dB RMS apart`,
+          how: 'Both compressors are run over the same loop and what they did to '
+             + 'it - the gain reduction, moment by moment - is framed at five '
+             + 'milliseconds and compared frame by frame. Framed first so that a '
+             + 'single sample of disagreement on a transient does not read as a '
+             + 'wrong answer.',
+        },
+        {
+          label: 'Amount',
+          value: `${depth > 0 ? '+' : ''}${depth.toFixed(2)} dB`
+               + `${Math.abs(depth) < 0.05 ? '' : depth > 0 ? ' - yours works less' : ' - yours works harder'}`,
+          how: 'The average of that difference. This is threshold and ratio: how '
+             + 'much reduction yours does overall, regardless of when.',
+        },
+        {
+          label: 'Timing',
+          value: `${shape.toFixed(2)} dB`,
+          how: 'What is left once the amount is taken out. This is attack and '
+             + 'release - the same total reduction arriving and leaving at a '
+             + 'different moment - and it is the half most people find hard to '
+             + 'hear.',
+        },
+      ],
     };
   },
 
@@ -414,6 +440,26 @@ export default {
             : 'closer',
         },
       ],
+      why: [
+        {
+          label: 'Beats out of line',
+          value: `${off.toFixed(2)} dB, from ${uneven} dB`,
+          how: 'Each beat of your output is measured and held against the same '
+             + 'loop without the fault in it - not against every beat being the '
+             + 'same loudness, because a kick and a snare are not the same '
+             + 'loudness on any record ever made. Overall level is taken out of '
+             + 'both first: making it even is the question, making it loud is '
+             + 'what the makeup gain is for.',
+        },
+        {
+          label: 'Deepest reduction',
+          value: `${(-deepest).toFixed(1)} dB, ceiling ${ceiling} dB`,
+          how: `The most the compressor pulled down at any moment. Flattening `
+             + `everything would level the loop perfectly and throw the `
+             + `performance away, so anything past ${OVERWORKED} dB more than the `
+             + `fault itself fails whatever the levels came out at.`,
+        },
+      ],
     };
   },
 
@@ -448,6 +494,30 @@ export default {
             : stuck ? 'never comes back up'
             : got.held ? `back in ${Math.round(got.recovery)} ms, when it comes back`
             : `back in ${Math.round(got.recovery)} ms`,
+        },
+      ],
+      why: [
+        {
+          label: 'Depth',
+          value: `${got.depth.toFixed(2)} dB, wanted ${answer.depth.toFixed(1)}`,
+          how: 'Measured off the gain reduction at each kick rather than read off '
+             + 'the threshold and ratio, because what a sidechain actually does '
+             + 'depends on how loud the key signal is when it arrives.',
+        },
+        {
+          label: 'Recovery',
+          value: stuck ? 'never comes back up'
+               : `${Math.round(got.recovery)} ms, wanted ${Math.round(answer.recovery)}`,
+          how: 'How long it takes to climb back to within a couple of decibels of '
+             + 'where it started, averaged over the kicks in the loop.',
+        },
+        {
+          label: 'Time, as a ratio',
+          value: stuck ? 'out of range' : `${timeOff.toFixed(2)} octaves out`,
+          how: 'Time is heard in ratios, so this is compared in log space: a '
+             + 'hundred milliseconds out means something quite different at 120 '
+             + 'than it does at 400. A third of the way to twice as long is the '
+             + 'window.',
         },
       ],
     };
@@ -499,10 +569,11 @@ export default {
 
     return {
       guess: () => ({ ...settings }),
-      reveal: () => {
+      reveal: ({ live = false } = {}) => {
         if (exercise === 'match') plugin.showTarget(puzzle.answer);
-        plugin.lock();
+        if (!live) plugin.lock();
       },
+      unlock: () => plugin.unlock(),
       toggle: () => plugin.toggle(),
       destroy: () => plugin.destroy(),
     };
@@ -514,6 +585,51 @@ export default {
 
   play() {
     // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  /**
+   * The way out, in two rungs, worked out from the answer.
+   *
+   * What people get wrong first on a compressor is almost never the number -
+   * it is the kind of thing being asked for. So the first rung says what sort
+   * of compression this is, and the second puts a region round the control
+   * that is doing the work.
+   */
+  hints(answer, tier, puzzle) {
+    const exercise = puzzle?.settings?.exercise ?? 'match';
+
+    if (exercise === 'fix') {
+      const uneven = puzzle?.uneven ?? 12;
+      return [
+        `The loop is about ${uneven} dB apart beat to beat, and the job is to `
+          + 'close that up without flattening it.',
+        'Work down from a gentle ratio rather than up from a hard one: the '
+          + 'threshold is doing most of this, and there is a ceiling on how much '
+          + 'reduction counts as levelling rather than squashing.',
+      ];
+    }
+
+    if (exercise === 'duck') {
+      return [
+        'This is keyed off the kick, so the detector is listening to something '
+          + 'other than what you are hearing come out.',
+        `It wants around ${answer.depth.toFixed(0)} dB of duck, back up in `
+          + `${answer.recovery < 180 ? 'under a fifth of a second' : answer.recovery < 320 ? 'roughly a quarter of a second' : 'something over a third of a second'}. `
+          + 'The release is what sets that, not the ratio.',
+      ];
+    }
+
+    const settings = settle(answer);
+    const ratio = settings.ratio;
+    return [
+      ratio >= 8 ? 'It is working hard - a limiting sort of ratio, not a gentle one.'
+        : ratio >= 4 ? 'It is a working ratio: audible, but not limiting.'
+        : 'It is gentle - a low ratio doing a little, everywhere.',
+      `The attack is ${settings.attack < 8 ? 'fast enough to catch the transient'
+        : settings.attack < 40 ? 'middling - the transient gets through, then it clamps'
+        : 'slow: it lets the hit past before it does anything'}, and the release is `
+        + `${settings.release < 120 ? 'short' : settings.release < 350 ? 'medium' : 'long'}.`,
+    ];
   },
 
   reveal(answer, tier, puzzle) {

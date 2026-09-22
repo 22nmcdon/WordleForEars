@@ -242,6 +242,30 @@ export default {
           narrow: true,
         },
       ],
+      why: [
+        {
+          label: 'Balance, yours',
+          value: `${got > 0 ? '+' : ''}${got.toFixed(2)} dB`,
+          how: 'The difference in level between the two channels, measured off '
+             + 'the audio rather than read off the pan control. Positive is left.',
+        },
+        {
+          label: 'Balance, wanted',
+          value: `${wanted > 0 ? '+' : ''}${wanted.toFixed(2)} dB`,
+          how: 'Measured the same way, off the same bed panned to the answer. Two '
+             + 'measurements rather than a measurement and a formula: the bed is '
+             + 'not perfectly centred to begin with, and working one side out on '
+             + 'paper left a residual that moved with the material and, at the '
+             + 'finest tier, was most of the tolerance.',
+        },
+        {
+          label: 'Matched at',
+          value: `${close.toFixed(2)} dB or less`,
+          how: 'How far apart the two balances may sit and still be the same '
+             + 'place. It tightens with the tier, because the tier is how finely '
+             + 'the answer was placed.',
+        },
+      ],
     };
   },
 
@@ -301,6 +325,26 @@ export default {
             : `too ${gap.wider > 0 ? 'wide' : 'narrow'} at ${gap.where}`,
         },
       ],
+      why: [
+        {
+          label: 'Worst band',
+          value: gap.where === null
+            ? 'the whole image, not one band'
+            : `${gap.where}, ${error.toFixed(2)} dB out`,
+          how: 'The image is measured in six bands, and this is the one furthest '
+             + 'from the target. The worst band rather than the average, because '
+             + 'an average over six says nothing when one is in completely the '
+             + 'wrong place and the other five are right.',
+        },
+        {
+          label: 'Which way',
+          value: gap.where === null
+            ? `sitting ${gap.placed > 0 ? 'left' : 'right'} of centre`
+            : `${Math.abs(gap.wider).toFixed(2)} dB too ${gap.wider > 0 ? 'wide' : 'narrow'}`,
+          how: 'Width is the side signal against the middle. Too wide and it will '
+             + 'not survive being summed; too narrow and the record closes up.',
+        },
+      ],
     };
   },
 
@@ -349,6 +393,31 @@ export default {
             : `${(wasTop - top).toFixed(1)} dB of the top gone too`,
         },
       ],
+      why: [
+        {
+          label: 'Mono cost, low end',
+          value: `${cost.toFixed(2)} dB, allowed ${close.toFixed(1)}`,
+          how: 'What the bottom two bands lose when the two channels are summed. '
+             + 'Anything on the sides down there cancels against itself, which is '
+             + 'why a wide low end disappears on a system that plays one speaker.',
+        },
+        {
+          label: 'Top left standing',
+          value: `${top.toFixed(2)} against ${wasTop.toFixed(2)} untouched`,
+          how: `How wide the top three bands still are. Monoing everything makes `
+             + `the low end perfectly safe and throws the record away, so the top `
+             + `may not lose more than ${KEEP_THE_TOP} of its width.`,
+        },
+        {
+          label: 'Still pointing forward',
+          value: leaning ? 'no - it has been thrown to one side' : 'yes',
+          how: 'Read off the pan rather than the measured balance. The two are '
+             + 'not separable - scaling the side of a band moves the balance '
+             + 'whenever the middle and the side are at all related - so a '
+             + 'legitimate narrowing of the low end failed a guard meant for a '
+             + 'hard pan until this was read off the control instead.',
+        },
+      ],
     };
   },
 
@@ -380,10 +449,11 @@ export default {
 
     return {
       guess: () => ({ ...settings }),
-      reveal: () => {
+      reveal: ({ live = false } = {}) => {
         if (puzzle.answer) plugin.showTarget({ ...IMAGE_DEFAULTS, ...puzzle.answer });
-        plugin.lock();
+        if (!live) plugin.lock();
       },
+      unlock: () => plugin.unlock(),
       toggle: () => plugin.toggle(),
       destroy: () => plugin.destroy(),
     };
@@ -395,6 +465,51 @@ export default {
 
   play() {
     // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  /** The way out, in two rungs, worked out from the answer. */
+  hints(answer, tier, puzzle) {
+    const exercise = puzzle?.settings?.exercise ?? 'place';
+
+    if (exercise === 'mono') {
+      return [
+        'The problem is down low, and it is width: there is too much on the '
+          + 'sides for the bottom end to survive being summed.',
+        'Narrow the low band and leave the top alone. Panning the whole thing '
+          + 'would also make it mono-safe, for the same reason a mono record is, '
+          + 'and that is marked as the wrong answer it is.',
+      ];
+    }
+
+    if (exercise === 'match') {
+      const settings = { ...IMAGE_DEFAULTS, ...answer };
+      const named = [['low', 'the low band'], ['mid', 'the middle'], ['high', 'the top']]
+        .filter(([id]) => Math.abs(settings[id] - 1) > 0.08);
+
+      return [
+        named.length === 1
+          ? `One band has moved: ${named[0][1]}.`
+          : `${named.length} bands have moved: ${named.map(([, name]) => name).join(' and ')}.`,
+        named.map(([id, name]) => `${name} is ${settings[id] > 1 ? 'wider' : 'narrower'}`)
+          .join(', and ') + '.',
+      ];
+    }
+
+    const pan = answer.pan;
+    return [
+      Math.abs(pan) < 0.12
+        ? 'It is in the middle, or close enough to it that the reading will not '
+          + 'separate the two.'
+        : `It is on ${pan < 0 ? 'the left' : 'the right'} of centre - so the pan `
+          + 'has to move, and it has to move that way.',
+      Math.abs(pan) < 0.12
+        ? 'Leave the pan where it is and read the balance rather than the control.'
+        : Math.abs(pan) > 0.8
+          ? 'And it is most of the way over, not a nudge - close to hard over.'
+        : Math.abs(pan) > 0.4
+          ? 'About halfway out: audibly to one side, but not pinned against it.'
+        : 'Only a little way out - closer to the middle than to the side.',
+    ];
   },
 
   reveal(answer, tier, puzzle) {

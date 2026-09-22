@@ -10,9 +10,9 @@ globalThis.localStorage = {
   clear: () => store.clear(),
 };
 
-const { getStats, recordGame, dailyResult, weakestKind, resetStats } = await import('../src/stats.js');
-const { createGame, submitGuess, makePuzzle, MAX_GUESSES } = await import('../src/game.js');
-const { MODES } = await import('../src/modes/index.js');
+const { getStats, recordGame, weakestKind, resetStats, ATTEMPT_BANDS, attemptBand } =
+  await import('../src/stats.js');
+const { createGame, submitGuess, makePuzzle, showAnswer } = await import('../src/game.js');
 
 // These used to be chord puzzles, because a chord quality is the simplest
 // thing a mode can call "one kind of answer". The chords are gone, so they are
@@ -31,26 +31,28 @@ const puzzleFor = (frequency, seed = 's') => (
 );
 
 /**
- * Enough losing guesses to run a round out.
+ * Guesses a long way from the answer, all of them different.
  *
- * As many as the tier allows, all of them a long way from the answer and all
- * of them different, because a repeat is refused without burning a turn.
+ * There is no number of these that ends a round any more, so what they are
+ * for is getting to the point where somebody gives up and asks - which is the
+ * only way a round is now recorded without being solved.
  */
-const wrongFor = (frequency, tries = MODES.eq.tiers.easy.guesses) => Array.from(
+const wrongFor = (frequency, tries = 4) => Array.from(
   { length: tries },
   (_, i) => bandAt(frequency > 1000 ? 50 + i * 4 : 8000 + i * 400, -11),
 );
 
-function play(puzzle, guesses, playing = 'practice') {
+function play(puzzle, guesses, { playing = 'practice', give = false } = {}) {
   let game = createGame(puzzle, { mode: playing });
   for (const guess of guesses) game = submitGuess(game, guess);
+  if (give) game = showAnswer(game);
   recordGame(game);
   return game;
 }
 
 test.beforeEach(() => resetStats());
 
-test('a win records a streak and lands in the right distribution bucket', () => {
+test('a solve records a streak and lands in the right attempt band', () => {
   play(puzzleFor(MUD), [bandAt(9000, -9), bandAt(MUD)]);
 
   const stats = getStats('practice', 'eq', 'easy');
@@ -58,36 +60,48 @@ test('a win records a streak and lands in the right distribution bucket', () => 
   assert.equal(stats.won, 1);
   assert.equal(stats.streak, 1);
   assert.equal(stats.maxStreak, 1);
-  assert.equal(stats.distribution[1], 1, 'solved on guess two');
+  assert.equal(stats.attempts['2'], 1, 'solved on the second attempt');
 });
 
-test('a loss breaks the streak but keeps the best', () => {
+test('the attempt bands are open-ended, and band at the edges', () => {
+  // The whole reason they are bands: there is no ceiling to size an array to
+  // any more, and eleven attempts against fourteen is not a signal worth
+  // keeping apart. Three against four is.
+  assert.equal(attemptBand(1).id, '1');
+  assert.equal(attemptBand(3).id, '3');
+  assert.equal(attemptBand(4).id, '4-5');
+  assert.equal(attemptBand(5).id, '4-5');
+  assert.equal(attemptBand(6).id, '6-9');
+  assert.equal(attemptBand(9).id, '6-9');
+  assert.equal(attemptBand(10).id, '10+');
+  assert.equal(attemptBand(400).id, '10+', 'the top band has no top');
+
+  const covered = ATTEMPT_BANDS.flatMap((band) =>
+    Array.from({ length: Math.min(band.to, 40) - band.from + 1 }, (_, i) => band.from + i));
+  assert.deepEqual(covered, Array.from({ length: 40 }, (_, i) => i + 1),
+    'the bands tile the counts with no gap and no overlap');
+});
+
+test('asking to be shown counts as played, never as solved', () => {
   play(puzzleFor(MUD), [bandAt(MUD)]);
-  play(puzzleFor(HARSH, 's2'), wrongFor(HARSH));
+  play(puzzleFor(HARSH, 's2'), wrongFor(HARSH), { give: true });
 
   const stats = getStats('practice', 'eq', 'easy');
   assert.equal(stats.played, 2);
-  assert.equal(stats.won, 1);
-  assert.equal(stats.streak, 0);
+  assert.equal(stats.won, 1, 'being shown is not a solve');
+  assert.equal(stats.streak, 0, 'and it breaks the run');
   assert.equal(stats.maxStreak, 1);
-});
 
-test('a finished daily is stored so it cannot be replayed', () => {
-  const puzzle = puzzleFor(HONK, 'daily:eq:easy:2026-09-21');
-  assert.equal(dailyResult(puzzle), null);
-  play(puzzle, [bandAt(60, -9), bandAt(HONK)], 'daily');
-
-  const saved = dailyResult(puzzle);
-  assert.equal(saved.status, 'won');
-  assert.equal(saved.guesses.length, 2);
-  assert.equal(saved.guesses[1][0].frequency, HONK, 'the winning guess is what was stored');
-  assert.equal(dailyResult(puzzleFor(HONK, 'daily:eq:easy:2026-09-22')), null);
+  // And it does not land in an attempt band: it did not take four attempts to
+  // get there, it took four attempts and then the answer.
+  const banded = Object.values(stats.attempts).reduce((a, b) => a + b, 0);
+  assert.equal(banded, 1, 'only the solve is counted among the attempts');
 });
 
 test('the weak-spot hint waits for enough data, then names the worst kind of answer', () => {
   assert.equal(weakestKind(getStats('practice', 'eq', 'easy')), null, 'no hint from one game');
 
-  for (let i = 0; i < 3; i += 1) play(puzzleFor(HARSH, `d${i}`), wrongFor(HARSH));
+  for (let i = 0; i < 3; i += 1) play(puzzleFor(HARSH, `d${i}`), wrongFor(HARSH), { give: true });
   play(puzzleFor(MUD, 'm1'), [bandAt(MUD)]);
 
   const weak = weakestKind(getStats('practice', 'eq', 'easy'));
@@ -109,13 +123,41 @@ test('a bucket is its own per mode, so the modes do not pool their streaks', () 
   assert.equal(getStats('daily', 'eq', 'easy').played, 0, 'nor has the daily');
 });
 
-test('a bucket makes room for the longest tier in the suite', () => {
-  assert.equal(getStats('practice', 'eq', 'easy').distribution.length, MAX_GUESSES);
+test('the daily is no longer locked once it has been played', () => {
+  // It stays the same puzzle for everybody on the same day, which is the whole
+  // of what made it worth having. What it no longer does is refuse a second
+  // run - there is no scarce resource left to protect, and the restore that
+  // used to enforce it re-scored stored guesses against audio that loads
+  // asynchronously, so it could print different text than had been shown.
+  const puzzle = puzzleFor(HONK, 'daily:eq:easy:2026-09-21');
+  play(puzzle, [bandAt(60, -9), bandAt(HONK)], { playing: 'daily' });
+
+  const again = createGame(puzzle, { mode: 'daily' });
+  assert.equal(again.status, 'playing', 'the same daily opens fresh');
+  assert.equal(again.guesses.length, 0);
+
+  assert.equal(getStats('daily', 'eq', 'easy').played, 1);
+  assert.ok(!('daily' in JSON.parse(localStorage.getItem('headroom.stats.v2'))),
+    'nothing is kept per-puzzle any more');
+});
+
+test('a stored bucket from an older shape is filled in rather than thrown on', () => {
+  // What comes back from a browser was written by whatever version of this
+  // file the browser last ran. Reading a field added since should give a zero.
+  localStorage.setItem('headroom.stats.v2', JSON.stringify({
+    buckets: { 'practice:eq:easy': { played: 3, won: 2 } },
+  }));
+
+  const stats = getStats('practice', 'eq', 'easy');
+  assert.equal(stats.played, 3);
+  assert.equal(stats.won, 2);
+  assert.deepEqual(stats.attempts, Object.fromEntries(ATTEMPT_BANDS.map((b) => [b.id, 0])));
+  assert.deepEqual(stats.byAnswer, {});
 });
 
 test('corrupt storage degrades to empty stats instead of throwing', () => {
-  localStorage.setItem('headroom.stats.v1', '{not json');
+  localStorage.setItem('headroom.stats.v2', '{not json');
   const stats = getStats('practice', 'eq', 'easy');
   assert.equal(stats.played, 0);
-  assert.deepEqual(stats.distribution, new Array(MAX_GUESSES).fill(0));
+  assert.deepEqual(stats.attempts, Object.fromEntries(ATTEMPT_BANDS.map((b) => [b.id, 0])));
 });

@@ -162,7 +162,68 @@ export default {
             : `${writeHz(worstAt)} ${worst > 0 ? 'too hot' : 'too shy'}`,
         },
       ],
+      why: [
+        {
+          label: 'Worst point',
+          value: `${error.toFixed(2)} dB, at ${writeHz(worstAt)}`,
+          how: 'Both sets of bands are turned into a curve and read at 96 '
+             + 'frequencies from 30 Hz to 16 kHz, spaced the way the ear hears '
+             + 'them. This is the largest gap between the two, and where it is.',
+        },
+        {
+          label: 'Which way',
+          value: worst > 0 ? 'yours is louder there' : 'yours is quieter there',
+          how: 'The sign of that same gap. It is the direction to move the band '
+             + 'nearest that frequency, not necessarily the one you last touched.',
+        },
+        {
+          label: 'Matched at',
+          value: `${close.toFixed(1)} dB or less`,
+          how: 'The worst point rather than the average, because averaged across '
+             + 'the whole spectrum one band is a small part of a wide range - '
+             + 'doing nothing at all measured about two decibels and very nearly '
+             + 'passed. Two curves that sit on each other everywhere is what '
+             + 'anybody looking at them would call matched.',
+        },
+      ],
     };
+  },
+
+  /**
+   * The way out, in two rungs, worked out from the answer.
+   *
+   * The first says what kind of move it is, which is the thing people get
+   * wrong first: hunting for a cut with a boost. The second narrows it to a
+   * region - not a frequency, because being handed the frequency is the
+   * reveal, and that has its own button.
+   */
+  hints(answer, tier, puzzle) {
+    const bands = puzzle?.fault
+      ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
+      : answer;
+
+    const cuts = bands.filter((band) => band.gain < 0).length;
+    const kind = cuts === bands.length ? 'every one of them is a cut'
+      : cuts === 0 ? 'every one of them is a boost'
+      : `${cuts} of them ${cuts === 1 ? 'is a cut' : 'are cuts'}`;
+
+    const where = bands
+      .map((band) => {
+        const f = band.frequency;
+        return f < 120 ? 'down in the bass' : f < 400 ? 'in the low mids'
+          : f < 1200 ? 'in the middle' : f < 4000 ? 'in the upper mids'
+          : 'up in the top';
+      })
+      .filter((zone, i, all) => all.indexOf(zone) === i);
+
+    const biggest = bands.reduce((a, b) => (Math.abs(b.gain) > Math.abs(a.gain) ? b : a));
+
+    return [
+      `${bands.length === 1 ? 'It is one band' : `It is ${bands.length} bands`}, and ${kind}.`,
+      `The move is ${where.join(', and ')}.`,
+      `The biggest of them is about ${Math.abs(biggest.gain).toFixed(0)} dB, `
+        + `and ${biggest.q < 1.2 ? 'wide' : biggest.q < 3 ? 'fairly narrow' : 'very narrow'}.`,
+    ];
   },
 
   /* ---------- the surface ---------- */
@@ -181,12 +242,16 @@ export default {
 
     return {
       guess: () => bands.map((band) => ({ ...band })),
-      reveal: () => {
+      reveal: ({ live = false } = {}) => {
         plugin.showTarget(fix
           ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
           : puzzle.answer);
-        plugin.lock();
+        // Shown on request rather than at the end of the round: the target is
+        // drawn over yours and the bands stay draggable, so you can hear your
+        // way onto it instead of only being told where it was.
+        if (!live) plugin.lock();
       },
+      unlock: () => plugin.unlock(),
       destroy: () => plugin.destroy(),
     };
   },

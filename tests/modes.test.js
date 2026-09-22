@@ -325,19 +325,21 @@ test('a whole round can be played out in every mode, tier and exercise', () => {
     const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `round-${id}-${tier}` });
     let game = createGame(puzzle);
 
-    for (let i = 0; i < game.allowed - 1; i += 1) game = submitGuess(game, wrongGuess(puzzle, i));
-    assert.equal(game.status, 'playing', `${id}/${tier} ended early`);
+    // Six attempts, which used to be past two of the three tiers' ceilings.
+    for (let i = 0; i < 6; i += 1) game = submitGuess(game, wrongGuess(puzzle, i));
+    assert.equal(game.status, 'playing', `${id}/${tier} ended on its own`);
 
     const perfect = answerAsGuess(puzzle);
     if (perfect === null) {
       // An exercise marked on the result has no answer to play back, so what
-      // is checked is that it runs out cleanly rather than hanging on.
-      game = submitGuess(game, wrongGuess(puzzle, game.allowed));
-      assert.equal(game.status, 'lost', `${id}/${tier} did not run out`);
+      // is checked is that it keeps taking attempts rather than closing.
+      game = submitGuess(game, wrongGuess(puzzle, 6));
+      assert.equal(game.guesses.length, 7, `${id}/${tier} stopped taking attempts`);
+      assert.equal(game.status, 'playing', `${id}/${tier} ended on its own`);
       continue;
     }
 
     game = submitGuess(game, perfect);
-    assert.equal(game.status, 'won', `${id}/${tier} did not accept the answer`);
+    assert.equal(game.status, 'solved', `${id}/${tier} did not accept the answer`);
   }
 });

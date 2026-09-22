@@ -38,7 +38,6 @@
   --serif:  "Playfair Display", Georgia, "Times New Roman", serif;
   --script: "Cormorant Garamond", Georgia, serif;
   --sans:   "Jost", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --hand:   "Kalam", "Bradley Hand", "Segoe Print", cursive;
   --mono:   ui-monospace, Menlo, Consolas, monospace;
 
   --max: 1080px;
@@ -411,36 +410,59 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 }
 .notes-body p + p { margin-top: 8px; }
 
-/* --- the board ----------------------------------------------------------- */
-/* A mode decides how many readings a row carries - a chord has two, an EQ move
-   has three - so the columns are set per row from the cells themselves. Capped,
-   because a board that ran the width of a desktop sheet left one word floating
-   in a lot of paper. */
-.board-head, .row {
+/* --- the log ------------------------------------------------------------- */
+/* What you have tried, newest first, growing downwards for as long as you keep
+   trying. What was here was a fixed grid of rows, which had to know how many
+   attempts you were allowed before anything was played; nothing here knows or
+   needs to. A tool decides how many readings an attempt carries - two for a
+   surface, one per control for a picker - so the columns are set per row from
+   the cells themselves. Capped, because a row that ran the width of a desktop
+   sheet left one word floating in a lot of paper. */
+.log { margin-top: 18px; }
+.surface:not([hidden]) + .log:has(.attempt) {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.attempts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.attempt {
   display: grid;
-  gap: 6px;
-  /* `width` is not redundant beside `max-width`. A flex item with `margin: auto`
-     in the cross axis has those margins absorb the free space instead of
-     stretching, so a row sized itself to its own two words and sat in the
-     middle of the sheet as a pair of stamps. Given a width to start from, the
-     max-width caps it and the auto margins centre it. */
+  /* The number sits in its own gutter so the readings line up down the page
+     however many attempts deep you are. */
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
   width: 100%;
-  max-width: 460px;
+  max-width: 482px;
   margin-inline: auto;
 }
-.board-head {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  color: var(--blush-deep);
-  text-align: center;
-  margin-bottom: 8px;
-  font-weight: 500;
+.attempt-n {
+  font-family: var(--serif);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-soft);
+  text-align: right;
 }
-.board { display: flex; flex-direction: column; gap: 6px; }
-/* A mode that brings its own interface needs the attempts held off it. */
-.surface:not([hidden]) + .board { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
-.board-head span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A newly added attempt arrives at the top; the ones under it slide rather
+   than jump, so the eye keeps its place. */
+.attempt:first-child .row { animation: land 220ms ease both; }
+@keyframes land {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attempt:first-child .row { animation: none; }
+}
+
+.row { display: grid; gap: 6px; }
+
+.log-more {
+  display: block;
+  margin: 10px auto 0;
+  font-size: 12px;
+}
 
 .cell {
   display: flex;
@@ -455,7 +477,6 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   font-size: 14px;
   color: var(--text);
 }
-.cell.blank { background: none; }
 .cell.hit { background: var(--sage); border-color: var(--sage); color: var(--paper); }
 .cell.near { background: var(--gold); border-color: var(--gold); color: var(--charcoal); }
 .cell.miss { background: var(--rust); border-color: var(--rust); color: var(--paper); }
@@ -467,13 +488,76 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
-/* Chord symbols are in the hand face, and nothing else is. */
-.cell .value.hand { font-family: var(--hand); font-weight: 700; font-size: clamp(17px, 2.2vw, 22px); }
 .cell .alt { opacity: 0.68; }
+
+/* --- the working ---------------------------------------------------------- */
+/* Every scorer here works out more than the two cells it prints. This is that
+   arithmetic, kept: what was measured, what it came to, and how. Closed, and
+   in the log's own gutter so it reads as a footnote to one attempt rather than
+   as a section of the page. */
+.why { grid-column: 2; margin-top: 4px; }
+.why-open {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 3px 0;
+  list-style: none;
+}
+.why-open::-webkit-details-marker { display: none; }
+/* The character itself rather than "\2212 ": in CSS the space after a hex
+   escape terminates it and is swallowed, so the open state lost its gap while
+   the closed one kept it. */
+.why-open::before { content: "+ "; }
+.why[open] .why-open::before { content: "− "; }
+.why-open:hover { color: var(--blush-deep); }
+
+.why-list {
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  background: var(--cream);
+  border-left: 2px solid var(--blush);
+}
+.why-list dt {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin-top: 10px;
+}
+.why-list dt:first-child { margin-top: 0; }
+.why-value {
+  margin: 2px 0 0;
+  font-family: var(--serif);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--charcoal);
+}
+.why-how { margin: 3px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-soft); }
 
 /* Handwriting faces have no flat or sharp glyph, so borrow the serif's. */
 .acc { font-family: var(--serif); font-weight: 500; font-size: 0.82em; padding-inline: 0.02em; }
-.ext { font-size: 0.74em; vertical-align: 0.42em; }
+
+/* --- the way out --------------------------------------------------------- */
+/* Running out of guesses used to be how you were shown an answer. There is
+   nothing to run out of any more, so the two ways out are buttons, and they sit
+   beside Submit from the first attempt rather than appearing once somebody has
+   struggled enough - which would be the ceiling again, wearing a hat. Set as
+   link buttons, because neither is the thing you came to press. */
+.dock-outs { display: inline-flex; gap: 12px; margin-left: auto; }
+.dock-out { font-size: 12px; }
+
+.hint-line {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  background: var(--cream);
+  border-left: 2px solid var(--gold);
+  font-family: var(--serif);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--charcoal);
+}
 
 /* --- the dock: your answer, always in reach ------------------------------ */
 .dock {
@@ -498,7 +582,6 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .verdict.matches { color: var(--sage); }
 .played { font-size: 13.5px; color: var(--text-soft); letter-spacing: 0.04em; }
 .played .symbol { font-family: var(--serif); font-weight: 600; font-size: 17px; color: var(--charcoal); font-variant-numeric: tabular-nums; }
-.played .symbol.hand { font-family: var(--hand); font-weight: 700; font-size: 18px; }
 .feedback .link-btn { margin-left: auto; }
 
 .picker-group + .picker-group { margin-top: 18px; }
@@ -1111,7 +1194,6 @@ input.knob-value:focus {
   color: var(--charcoal);
   font-variant-numeric: tabular-nums;
 }
-.option .symbol.hand { font-family: var(--hand); font-weight: 700; font-size: 23px; }
 .option .name {
   display: block;
   font-size: 9.5px;
@@ -1138,7 +1220,9 @@ input.knob-value:focus {
 .swatch.hit { background: var(--sage); }
 .swatch.near { background: var(--gold); }
 .swatch.miss { background: var(--rust); }
-.dock-foot .submit-btn { margin-left: auto; }
+/* The `.dock-outs` group carries the auto margin now, so Submit only needs
+   space from whatever is to its left. */
+.dock-foot .submit-btn { margin-left: 14px; }
 
 /* --- dialogs ------------------------------------------------------------- */
 dialog {
@@ -1236,7 +1320,7 @@ dialog::backdrop { background: rgba(36, 31, 29, 0.45); }
 }
 .dist { display: flex; flex-direction: column; gap: 5px; }
 .dist-row { display: flex; align-items: center; gap: 9px; font-size: 12px; }
-.dist-row > span { width: 12px; color: var(--text-soft); }
+.dist-row > span { width: 26px; color: var(--text-soft); font-variant-numeric: tabular-nums; }
 .bar {
   background: var(--blush-deep);
   color: var(--paper);
@@ -1300,6 +1384,12 @@ dialog::backdrop { background: rgba(36, 31, 29, 0.45); }
   .setup { justify-content: center; }
   .plays { margin-left: 0; width: 100%; }
   .cell { min-height: 46px; }
+  /* The gutter goes: at this width the attempt number is worth less than the
+     six pixels either side of a reading. */
+  .attempt { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
+  .attempt-n { display: none; }
+  .why { grid-column: 1; }
+  .dock-outs { margin-left: 0; }
   .options { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
   .dock-foot .submit-btn { margin-left: 0; width: 100%; }
 

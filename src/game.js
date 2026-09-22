@@ -1,14 +1,7 @@
-import { modeOf, MODES } from './modes/index.js';
+import { modeOf } from './modes/index.js';
 import { mulberry32, hashSeed, dayKey, puzzleNumber } from './random.js';
 
 export { HIT, NEAR, MISS } from './modes/scoring.js';
-
-/** The most guesses any mode's tier allows - what a stats bucket makes room for. */
-export const MAX_GUESSES = Math.max(
-  ...Object.values(MODES).flatMap((mode) => Object.values(mode.tiers).map((tier) => tier.guesses)),
-);
-
-export const guessesFor = (mode, tier) => modeOf(mode).tiers[tier].guesses;
 
 /**
  * Read a guess against the answer, through the mode that asked the question.
@@ -62,20 +55,49 @@ export function practiceSeed(mode, tier, salt = Math.random()) {
   return `practice:${mode}:${tier}:${salt}:${Date.now()}`;
 }
 
-/** Fresh game state around a puzzle. */
+/**
+ * Fresh state around a puzzle.
+ *
+ * There is no guess ceiling, and so no `lost`. A tool you can only touch four
+ * times is not a tool - the whole of the value is in moving something, hearing
+ * what it did to the reading, and moving it again. What used to end the round
+ * was running out; what ends it now is getting there, and the way out when you
+ * cannot is to ask for it.
+ */
 export function createGame(puzzle, { mode = 'practice', date = new Date() } = {}) {
   return {
     puzzle,
     mode, // 'daily' or 'practice' - the puzzle carries which training mode it is
-    allowed: guessesFor(puzzle.mode, puzzle.tier),
     number: mode === 'daily' ? puzzleNumber(date) : null,
     guesses: [],
-    status: 'playing', // 'playing' | 'won' | 'lost'
+    hinted: 0, // how far up the hint ladder this round has walked
+    status: 'playing', // 'playing' | 'solved' | 'shown'
   };
 }
 
-/** Two guesses are the same guess when every slot of them agrees. */
-const sameGuess = (a, b) => Object.keys(b).every((slot) => a[slot] === b[slot]);
+/**
+ * Two settings are the same setting, compared by shape rather than by slot.
+ *
+ * What was here before walked the keys of one side and compared with `===`,
+ * which for the EQ - whose guess is an array of band objects - compared object
+ * references and so never once caught a repeat. It was also asymmetric: a
+ * guess missing half its keys matched anything.
+ *
+ * And it is now only asked about the attempt immediately before. Going back to
+ * a setting you tried earlier to hear it again against what you have since
+ * learnt is ordinary work at a desk; refusing it would be Wordle's rule
+ * applied where it does not belong. What is still worth catching is pressing
+ * submit twice without having moved anything.
+ */
+export function sameGuess(a, b) {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => sameGuess(a[key], b[key]));
+}
 
 /** What the controls start on, before anything has been dialled. */
 export function startingGuess(mode, tier) {
@@ -87,19 +109,50 @@ export function startingGuess(mode, tier) {
 
 /** Apply a guess; returns a new state (the caller owns rendering). */
 export function submitGuess(game, guess) {
-  if (game.status !== 'playing') return game;
+  if (game.status === 'solved') return game;
 
-  if (game.guesses.some((played) => sameGuess(played.guess, guess))) {
-    return { ...game, error: 'You already tried that one.' };
+  const last = game.guesses[game.guesses.length - 1];
+  if (last && sameGuess(last.guess, guess)) {
+    return { ...game, error: 'Nothing has moved since the last one.' };
   }
 
   const score = scoreGuess(guess, game.puzzle);
   const guesses = [...game.guesses, { guess, score }];
-  let status = 'playing';
-  if (score.correct) status = 'won';
-  else if (guesses.length >= game.allowed) status = 'lost';
+
+  // Being shown the answer is sticky. You can keep working - that is the
+  // point of leaving the controls live - but arriving afterwards is not the
+  // same thing as arriving, and the record should not pretend it was.
+  const status = score.correct && game.status === 'playing' ? 'solved' : game.status;
 
   return { ...game, guesses, status, error: null };
+}
+
+/**
+ * The next rung of the hint ladder, or null at the top of it.
+ *
+ * Short, ordered, and worked out from the answer rather than from what you
+ * have tried: the first says what kind of move it is, the second says roughly
+ * where. Anything more specific than that is the reveal, which is its own
+ * button and says so.
+ */
+export function hintFor(game) {
+  const ladder = modeOf(game.puzzle.mode).hints?.(
+    game.puzzle.answer, game.puzzle.tier, game.puzzle) ?? [];
+  return ladder[game.hinted] ?? null;
+}
+
+export const hintsLeft = (game) => {
+  const ladder = modeOf(game.puzzle.mode).hints?.(
+    game.puzzle.answer, game.puzzle.tier, game.puzzle) ?? [];
+  return Math.max(0, ladder.length - game.hinted);
+};
+
+export const takeHint = (game) => ({ ...game, hinted: game.hinted + 1, error: null });
+
+/** Ask for the answer. The round stops counting; the controls do not stop. */
+export function showAnswer(game) {
+  if (game.status !== 'playing') return game;
+  return { ...game, status: 'shown', error: null };
 }
 
 /** What the answer was, for the reveal line. */

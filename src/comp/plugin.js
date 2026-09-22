@@ -710,6 +710,20 @@ export class CompPlugin {
     this.el.querySelector('.comp').classList.add('is-locked');
   }
 
+  /**
+   * And back, with everything where it was left.
+   *
+   * `lock()` never had an inverse, because nothing ever needed one: a round
+   * ended and the surface was torn down. Asking to be shown the answer is a
+   * state the round carries on from - the target is drawn and the controls
+   * stay live, so you can hear your way towards what you were chasing - and
+   * that needs the door to open again.
+   */
+  unlock() {
+    this.interactive = true;
+    this.el.querySelector('.comp').classList.remove('is-locked');
+  }
+
   destroy() {
     cancelAnimationFrame(this.frame);
     window.removeEventListener('resize', this.resize);

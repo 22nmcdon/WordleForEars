@@ -206,6 +206,29 @@ export default {
             : 'the right length, the wrong room',
         },
       ],
+      why: [
+        {
+          label: 'Decay, compared',
+          value: `${error.toFixed(2)} dB apart`,
+          how: 'Both rooms are built and their decays read in three bands, moment '
+             + 'by moment. One reading covers every control at once: the slope is '
+             + 'the decay time, the flat part at the start is the pre-delay, the '
+             + 'bands pulling apart is the damping, and where each band starts is '
+             + 'what the send filters did.',
+        },
+        {
+          label: 'Length',
+          value: `${writeSeconds(Math.abs(longer))} too ${longer > 0 ? 'long' : 'short'}`,
+          how: 'Each room measured down to thirty decibels and extrapolated to '
+             + 'sixty, which is the RT60 everybody quotes.',
+        },
+        {
+          label: 'Pre-delay',
+          value: `${Math.round(Math.abs(gap))} ms too ${gap > 0 ? 'late' : 'early'}`,
+          how: 'How long the room waits before it answers. It is what stops a '
+             + 'reverb sounding bolted onto the front of the sound.',
+        },
+      ],
     };
   },
 
@@ -260,6 +283,32 @@ export default {
               + `${settings.preDelay > answer.preDelay ? 'late' : 'early'}`,
         },
       ],
+      why: [
+        {
+          label: 'Left when the next hit lands',
+          value: `${left.toFixed(1)} dB, wanted ${CLEARED} give or take `
+               + `${STILL_A_ROOM[tier]}`,
+          how: 'Your room is built and read at exactly the moment the next hit '
+             + 'arrives. A range rather than a number, because a range is what '
+             + 'the ear gives you: nobody hears "thirty decibels down", what '
+             + 'anybody hears is whether it is still ringing when the next hit '
+             + 'comes.',
+        },
+        {
+          label: 'Which way',
+          value: ringing > 0 ? `${ringing.toFixed(1)} dB still going`
+               : `${dead.toFixed(1)} dB deader than it needs to be`,
+          how: 'Above the window is soup; below it there is no room left, which '
+             + 'is a different way of not fitting the track.',
+        },
+        {
+          label: 'Pre-delay, as a fraction',
+          value: `${(timing * 100).toFixed(0)}% out of ${answer.division}`,
+          how: 'Measured against the subdivision rather than in milliseconds, '
+             + 'because answering on the beat is what makes a room belong to a '
+             + 'track and a beat is a different length at every tempo.',
+        },
+      ],
     };
   },
 
@@ -279,10 +328,11 @@ export default {
 
     return {
       guess: () => ({ ...settings }),
-      reveal: () => {
+      reveal: ({ live = false } = {}) => {
         if (exercise === 'match') plugin.showTarget({ ...VERB_DEFAULTS, ...puzzle.answer });
-        plugin.lock();
+        if (!live) plugin.lock();
       },
+      unlock: () => plugin.unlock(),
       toggle: () => plugin.toggle(),
       destroy: () => plugin.destroy(),
     };
@@ -294,6 +344,31 @@ export default {
 
   play() {
     // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  /** The way out, in two rungs, worked out from the answer. */
+  hints(answer, tier, puzzle) {
+    if ((puzzle?.settings?.exercise ?? 'match') === 'tempo') {
+      return [
+        `The room has to be gone by the time the next hit lands - `
+          + `${answer.clearBy === 1 ? 'one beat' : 'two beats'} - and it has to `
+          + 'answer in time with the track.',
+        `The pre-delay wants to be on ${answer.division}. The decay is what you `
+          + 'set to clear the beat; damping the top will get you there without '
+          + 'shortening it further.',
+      ];
+    }
+
+    const settings = { ...VERB_DEFAULTS, ...answer };
+    return [
+      settings.decay < 0.8 ? 'It is a small room - short, and it stops quickly.'
+        : settings.decay < 2.5 ? 'It is a room rather than a hall: a second or two.'
+        : 'It is a hall - long, and it goes on well past the note.',
+      `Roughly ${Math.round(settings.preDelay)} ms in front of it, and the top `
+        + `${settings.damping < 0.5 ? 'dies well before the bottom'
+          : settings.damping < 0.85 ? 'comes off gradually' : 'hangs on nearly as long'}. `
+        + `About ${Math.round(settings.mix * 100)}% wet.`,
+    ];
   },
 
   reveal(answer, tier, puzzle) {

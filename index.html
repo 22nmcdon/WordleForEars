@@ -23,9 +23,9 @@
     <!-- A chart's own head: what is being played, what it is called, what it
          is. The feel changes with the mode, the way it would on a stand. -->
     <div class="sheet-head">
-      <span class="style-mark" id="modeMark">Chords</span>
+      <span class="style-mark" id="modeMark">EQ</span>
       <h1 class="sheet-title">Headroom</h1>
-      <span class="sheet-credit" id="modeBlurb">what kind of chord is that</span>
+      <span class="sheet-credit" id="modeBlurb">shape it until it matches</span>
     </div>
 
     <div class="top-bar-right">
@@ -76,7 +76,10 @@
            the EQ is a plugin, not a question with options under it. -->
       <div class="surface" id="surface" hidden></div>
 
-      <div class="board" id="board"></div>
+      <!-- What you have tried, newest first. Append-only and unbounded:
+           there is no ceiling to size an empty grid to any more, and the
+           first attempt decides the columns. -->
+      <div class="log" id="log"></div>
     </div>
   </section>
 </main>
@@ -84,20 +87,31 @@
 <div class="dock" id="dock">
   <div class="wrap">
     <div class="feedback">
-      <span class="verdict" id="verdict">Play the chord, then name it.</span>
+      <span class="verdict" id="verdict">Play the loop, then work the tool.</span>
       <span class="played" id="played"></span>
-      <button class="link-btn" type="button" id="share" hidden>Copy result</button>
-      <button class="link-btn" type="button" id="again" hidden>New chord</button>
+      <button class="link-btn" type="button" id="again" hidden>Another one</button>
     </div>
 
-    <!-- One group per thing the mode asks about: a chord has one, an EQ move
-         has two. -->
+    <!-- The two ways out, since running out of guesses is no longer one of
+         them. Both are there from the first attempt: holding them back until
+         somebody has struggled enough would be the ceiling again. -->
+    <p class="hint-line" id="hint-line" hidden></p>
+
+    <!-- One group per thing a drill asks about. A tool with its own surface
+         is answered on the surface and has none of these. -->
     <div class="picker" id="picker"></div>
 
     <div class="dock-foot">
       <span class="legend"><span class="swatch hit"></span> that is it</span>
       <span class="legend"><span class="swatch near"></span> close</span>
       <span class="legend"><span class="swatch miss"></span> not close</span>
+      <!-- Grouped, and the group carries the margin that pushes the row's
+           right-hand end over - so Submit sits in the same place whether
+           either of these is showing or neither is. -->
+      <span class="dock-outs">
+        <button class="link-btn dock-out" type="button" id="hint" hidden>Hint</button>
+        <button class="link-btn dock-out" type="button" id="show" hidden>Show me</button>
+      </span>
       <button class="submit-btn" type="button" id="submit" disabled>Submit guess</button>
     </div>
   </div>
@@ -112,7 +126,7 @@
 <dialog id="help">
   <div class="dialog-head">
     <div>
-      <div class="bar-label" id="helpMode">Chords</div>
+      <div class="bar-label" id="helpMode">EQ</div>
       <div class="dialog-title">How this works</div>
     </div>
     <button class="close-btn" type="button" id="help-close" aria-label="Close">&times;</button>
@@ -132,6 +146,9 @@
         What "close" means is each tool's own business, and the second column spells it out.</span></li>
       <li><b><span class="swatch miss"></span>Rust — not close.</b>
         <span>Never a mark against you: it is how far the two things sit apart.</span></li>
+      <li><b>Try it as many times as you like.</b>
+        <span>Nothing runs out. Hint says what kind of move it is; Show me draws the
+        answer on the tool and leaves the controls live.</span></li>
       <li><b>You are marked on the result, not the settings.</b>
         <span>Two different sets of controls that make the same curve, the same decay or the
         same harmonic series are the same answer. What is compared is what came out.</span></li>
@@ -148,7 +165,7 @@
 <dialog id="stats">
   <div class="dialog-head">
     <div>
-      <div class="bar-label" id="statsMode">Chords</div>
+      <div class="bar-label" id="statsMode">EQ</div>
       <div class="dialog-title">What you have played</div>
     </div>
     <button class="close-btn" type="button" id="stats-close" aria-label="Close">&times;</button>
@@ -157,7 +174,7 @@
   <div class="dialog-body">
     <p class="stats-scope" id="stats-scope"></p>
     <div class="stats-summary" id="stats-summary"></div>
-    <h3 class="subhead">Guesses it took</h3>
+    <h3 class="subhead">Attempts to get there</h3>
     <div class="dist" id="stats-dist"></div>
     <p class="weak" id="stats-weak"></p>
     <div class="dialog-actions">

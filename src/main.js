@@ -1,14 +1,14 @@
 import { MODES, MODE_IDS, modeOf } from './modes/index.js';
 import {
-  createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal, guessesFor,
-  settingsFor, startingGuess,
+  createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal,
+  settingsFor, startingGuess, hintFor, hintsLeft, takeHint, showAnswer,
 } from './game.js';
 import { Engine } from './audio.js';
-import { getStats, recordGame, dailyResult, weakestKind, resetStats } from './stats.js';
-import { shareText, copyToClipboard } from './share.js';
+import { getStats, recordGame, weakestKind, resetStats, ATTEMPT_BANDS } from './stats.js';
 import { puzzleNumber } from './random.js';
 import { engraveNote } from './engrave.js';
 import { renderPicker, syncPicker, pickerState, dialValue } from './bench/picker.js';
+import { makeLog } from './bench/log.js';
 import { notesFor } from './notes/index.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -37,6 +37,7 @@ const ui = {
   chosen: {}, // settings, per mode, so switching back finds them as you left them
   guess: {},
   game: null,
+  log: null, // what has been tried this round, newest first
   plays: 0,
 };
 
@@ -107,9 +108,11 @@ function syncAnswer() {
   const submit = $('#submit');
 
   if (mode().surface) {
-    const live = ui.game.status === 'playing';
+    // There is no "out of guesses" any more, so the only thing that closes the
+    // button is having got there.
+    const live = ui.game.status !== 'solved';
     submit.disabled = !live;
-    submit.textContent = live ? 'Lock it in' : 'Submitted';
+    submit.textContent = live ? 'Lock it in' : 'That is it';
     return;
   }
 
@@ -117,7 +120,7 @@ function syncAnswer() {
   syncPicker($('#picker'), slots, ui.guess);
 
   const { complete, dialling, summary } = pickerState(slots, ui.guess);
-  const ready = complete && ui.game.status === 'playing';
+  const ready = complete && ui.game.status !== 'solved';
 
   submit.disabled = !ready;
   submit.textContent = ready
@@ -241,20 +244,35 @@ function startGame({ fresh = false } = {}) {
   buildClue();
   buildPicker();
   mountSurface();
+  buildLog();
 
-  // One daily per mode per day: a finished one comes back read-only.
-  const saved = ui.playing === 'daily' ? dailyResult(puzzle) : null;
-  if (saved) {
-    for (const guess of saved.guesses) ui.game = submitGuess(ui.game, guess);
-    render();
-    finish(ui.game, { replay: false });
-    say("Today's is done — come back tomorrow, or switch to practice.");
-    return;
-  }
-
+  // The daily is no longer locked once it has been played. It stays the same
+  // puzzle for everybody on the same day - which is the whole of what made it
+  // worth having - but there is nothing left to protect it from: with the
+  // guess ceiling gone there is no scarce resource, and the restore this
+  // replaces re-ran the scoring over stored guesses and could print different
+  // text than had been shown, because the audio it marks against loads after
+  // the board does.
   render();
   // A mode with its own interface is not answered by naming anything.
   say(mode().opening ?? 'Play it, then name what you heard.');
+}
+
+/**
+ * The log, sized to whatever this tool's readings are called.
+ *
+ * Rebuilt per round rather than cleared, because a different tool has
+ * different columns - and the headings are for a screen reader only: with one
+ * attempt per line and the units inside every cell, a head row would be a
+ * third thing to size and would say what the cells already say.
+ */
+function buildLog() {
+  ui.log = makeLog($('#log'), {
+    write: writeSymbol,
+    headings: mode().surface
+      ? ['how close', 'where']
+      : mode().slots(ui.tier).map((slot) => slot.heading ?? slot.id),
+  });
 }
 
 function say(text, { matched = false } = {}) {
@@ -284,28 +302,49 @@ function onSubmit() {
     Object.entries(ui.guess).filter(([id]) =>
       mode().slots(ui.tier).find((slot) => slot.id === id)?.kind === 'range'));
 
-  if (next.status !== 'playing') {
+  const attempt = next.guesses[next.guesses.length - 1];
+  const n = ui.log.add(attempt.score);
+
+  if (next.status === 'solved') {
     recordGame(next);
     finish(next);
+  } else if (attempt.score.correct) {
+    // Arrived, but with the answer already in front of you. The reading is
+    // still true and still worth saying; what it is not is a solve.
+    say('That is it — with the answer up.', { matched: true });
   } else {
-    const left = next.allowed - next.guesses.length;
-    say(`${left} ${left === 1 ? 'guess' : 'guesses'} left.`);
+    say(`Attempt ${n}. ${closeness(attempt.score)}`);
   }
   render();
 }
 
+/**
+ * A word for how the last attempt went, now that there is no count to report.
+ *
+ * What was here said "two guesses left", which was the only thing the dock had
+ * to say and was about the game rather than about the audio. The cells carry
+ * the number; this carries the direction of travel.
+ */
+function closeness(score) {
+  const worst = score.cells.map((cell) => cell.state);
+  if (worst.every((state) => state === 'hit')) return 'Very close.';
+  if (worst.includes('hit') || worst.includes('near')) return 'Getting there.';
+  return 'Not there yet.';
+}
+
 /** The dock's answer: name the thing, never mark the player. */
-function finish(game, { replay = true } = {}) {
-  const won = game.status === 'won';
+function finish(game) {
+  const solved = game.status === 'solved';
   const count = game.guesses.length;
   const answer = reveal(game.puzzle);
 
-  say(won ? `That is it — in ${count} ${count === 1 ? 'guess' : 'guesses'}.`
-          : `${game.allowed} guesses up.`, { matched: won });
+  if (solved) {
+    say(`That is it — in ${count} ${count === 1 ? 'attempt' : 'attempts'}.`, { matched: true });
+  }
 
   const played = $('#played');
   played.textContent = '';
-  played.appendChild(document.createTextNode(won ? 'You heard ' : 'It was '));
+  played.appendChild(document.createTextNode(solved ? 'You built ' : 'It was '));
 
   const symbol = document.createElement('span');
   symbol.className = 'symbol';
@@ -314,59 +353,58 @@ function finish(game, { replay = true } = {}) {
   played.appendChild(document.createTextNode(answer.name ? ` — ${answer.name}.` : '.'));
 
   // A mode with its own interface shows the answer on it - the curve you were
-  // chasing, drawn over the one you built.
-  if (mode().surface) {
-    ui.surface?.reveal();
-    return;
-  }
+  // chasing, drawn over the one you built. Asked for rather than arrived at,
+  // the controls stay live: the point of being shown a target is to be able to
+  // move onto it and hear what closing the gap sounds like.
+  if (mode().surface) ui.surface?.reveal({ live: !solved });
+}
 
-  if (replay) playClue(mode().clues(ui.tier, settings())[0].id);
+/* ---------- the way out ---------- */
+
+/**
+ * A rung of the ladder, on request.
+ *
+ * Unbounded attempts removed the only thing that ever revealed an answer, so
+ * something has to take its place - and two things, rather than one, because
+ * being stuck and wanting to be finished are different states. A hint says
+ * what kind of move it is and roughly where; it does not say the number.
+ */
+function onHint() {
+  const line = hintFor(ui.game);
+  if (!line) return;
+
+  ui.game = takeHint(ui.game);
+  const hint = $('#hint-line');
+  hint.hidden = false;
+  hint.textContent = line;
+  render();
+}
+
+/** Show me: the answer drawn on the tool, and the controls left alive. */
+function onShow() {
+  if (ui.game.status !== 'playing') return;
+
+  ui.game = showAnswer(ui.game);
+  recordGame(ui.game);
+  say('There it is. The controls are still live — work your way onto it.');
+  finish(ui.game);
+  render();
 }
 
 /* ---------- rendering ---------- */
 
+/**
+ * Everything on the page that is about the round rather than the readings.
+ *
+ * The readings are the log's, and the log is append-only: `render` no longer
+ * draws them and never redraws them. What went with that is an entire
+ * apparatus for sizing an empty board - a head row, a preview cell, a column
+ * count, a chip-or-dial branch to decide how many readings a row would carry -
+ * all of it in service of drawing four rows of nothing before anything had
+ * been played. A log has nothing to draw until there is something to draw.
+ */
 function render() {
   const game = ui.game;
-  const slots = mode().slots(ui.tier);
-  const board = $('#board');
-  board.textContent = '';
-
-  // The head names the columns the mode actually reads, so a board with two
-  // readings and a board with three are both legible without a legend.
-  const sample = game.guesses[0]
-    ? game.guesses[0].score.cells
-    : previewCells(slots, mode());
-
-  const head = document.createElement('div');
-  head.className = 'board-head';
-  head.style.gridTemplateColumns = columns(sample);
-  for (const [i, cell] of sample.entries()) {
-    const span = document.createElement('span');
-    span.textContent = headings(slots, mode())[i] ?? '';
-    head.appendChild(span);
-  }
-  board.appendChild(head);
-
-  for (let i = 0; i < game.allowed; i += 1) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.style.gridTemplateColumns = columns(sample);
-
-    const played = game.guesses[i];
-    if (!played) {
-      row.classList.add('empty');
-      for (const cell of sample) row.appendChild(blankCell(cell));
-      board.appendChild(row);
-      continue;
-    }
-
-    row.setAttribute('aria-label', played.score.cells
-      .map((cell, n) => `${headings(slots, mode())[n] ?? 'reading'}: ${cell.text}, ${cell.state}`)
-      .join('; '));
-
-    for (const cell of played.score.cells) row.appendChild(drawCell(cell));
-    board.appendChild(row);
-  }
 
   const status = $('#puzzleStatus');
   status.textContent = ui.playing === 'daily'
@@ -377,62 +415,27 @@ function render() {
   $('#modeMark').textContent = mode().label;
   $('#modeBlurb').textContent = mode().blurb.toLowerCase();
 
-  const over = game.status !== 'playing';
-  $('#picker').classList.toggle('done', over);
-  $('#dock').classList.toggle('done', over);
-  $('#share').hidden = !over;
-  $('#again').hidden = !over;
+  const solved = game.status === 'solved';
+  $('#picker').classList.toggle('done', solved);
+  $('#dock').classList.toggle('done', solved);
+  $('#again').hidden = !solved && game.status !== 'shown';
   $('#again').textContent = ui.playing === 'daily' ? 'Try it in practice' : 'Another one';
-  if (!over) $('#played').textContent = '';
+  if (game.status === 'playing') $('#played').textContent = '';
+
+  // Both ways out are there from the first attempt and stay there. Hiding them
+  // until somebody has struggled enough would be the ceiling again, wearing a
+  // different hat.
+  const left = hintsLeft(game);
+  const hint = $('#hint');
+  hint.hidden = left === 0 || solved;
+  hint.textContent = game.hinted === 0 ? 'Hint' : `Another hint (${left} left)`;
+  $('#hint-line').hidden = game.hinted === 0;
+
+  const show = $('#show');
+  show.hidden = game.status !== 'playing';
 
   syncAnswer();
 }
-
-/**
- * What a row will look like before one has been played.
- *
- * A control's cell is already a reading - "0.4 oct low" - so a mode made of
- * controls returns one cell per control. Chips are not: the cell repeats the
- * pick, so those modes add a reading of their own beside it. Getting this
- * wrong shows up as a column on the empty board that no guess ever fills.
- */
-const dialling = (slots) => slots.some((slot) => slot.kind === 'range');
-
-const extraReading = (slots) => !dialling(slots) || slots.some((slot) => slot.extraReading);
-
-function previewCells(slots, spec) {
-  // A mode with its own interface has no slots to preview: it reports how
-  // close the thing you built came, and where it came apart.
-  if (spec.surface) return [{ state: 'blank', text: '' }, { state: 'blank', text: '' }];
-
-  const cells = slots.map((slot) => ({ state: 'blank', text: '', narrow: slot.narrowReading }));
-  if (extraReading(slots)) cells.push({ state: 'blank', text: '', narrow: true });
-  return cells;
-}
-
-const headings = (slots, spec) => (spec?.surface
-  ? ['how close', 'where']
-  : slots.map((slot) => slot.heading ?? slot.id).concat(extraReading(slots) ? ['close'] : []));
-
-const columns = (cells) => cells.map((cell) => (cell.narrow ? '0.45fr' : '1fr')).join(' ');
-
-function drawCell(cell) {
-  const node = document.createElement('div');
-  node.className = `cell ${cell.state}`;
-
-  const value = document.createElement('span');
-  value.className = 'value';
-  writeSymbol(value, cell.text);
-  node.appendChild(value);
-  return node;
-}
-
-const blankCell = (cell) => {
-  const node = document.createElement('div');
-  node.className = 'cell blank';
-  if (cell.narrow) node.classList.add('narrow');
-  return node;
-};
 
 /* ---------- stats ---------- */
 
@@ -452,14 +455,16 @@ function showStats() {
     ['Best', stats.maxStreak],
   ].map(([text, value]) => `<div><strong>${value}</strong><span>${text}</span></div>`).join('');
 
-  // Only the rows this tier can reach: a bucket makes room for the longest
-  // tier anywhere in the suite, and empty rows under it say nothing.
-  const rows = stats.distribution.slice(0, guessesFor(ui.mode, ui.tier));
-  const max = Math.max(1, ...rows);
-  $('#stats-dist').innerHTML = rows.map((count, i) => {
-    const width = Math.max(7, Math.round((count / max) * 100));
-    return `<div class="dist-row"><span>${i + 1}</span>`
-      + `<div class="bar" style="width:${width}%">${count}</div></div>`;
+  // Six bands, always all six. What was here sliced the rows to the tier's
+  // guess ceiling, which no longer exists - and converging in two rather than
+  // nine is the clearest signal of improvement this app has, so the bands stay
+  // fixed and comparable rather than shifting with the tool.
+  const counts = ATTEMPT_BANDS.map((band) => stats.attempts[band.id] ?? 0);
+  const max = Math.max(1, ...counts);
+  $('#stats-dist').innerHTML = ATTEMPT_BANDS.map((band, i) => {
+    const width = Math.max(7, Math.round((counts[i] / max) * 100));
+    return `<div class="dist-row"><span>${band.label}</span>`
+      + `<div class="bar" style="width:${width}%">${counts[i]}</div></div>`;
   }).join('');
 
   const weak = weakestKind(stats);
@@ -497,8 +502,14 @@ function fillHelp() {
       ? (slots.length > 1 ? `${slots.length} controls to dial.` : 'One control to dial.')
       : (slots.length > 1 ? 'Two things to name.' : 'One thing to name.'),
      slots.map((slot) => slot.label.replace(/\?$/, '')).join(', and ')
-       + `. ${tier.guesses} ${tier.guesses === 1 ? 'guess' : 'guesses'} on ${tier.label}.`],
+       + `. ${tier.label}: ${tier.blurb.toLowerCase()}.`],
   ];
+
+  entries.push(['Try it as many times as you like.',
+    'There is no limit and nothing to run out of - the whole of the value is '
+    + 'moving something, hearing what it did to the reading, and moving it '
+    + 'again. Hint says what kind of move it is; Show me draws the answer on '
+    + 'the tool and leaves the controls live, so you can hear your way onto it.']);
 
   for (const spec of mode().settings ?? []) {
     entries.push([`${spec.label}: ${spec.options.map((o) => o.label).join(', ')}.`,
@@ -600,11 +611,8 @@ function wire() {
     startGame({ fresh: true });
   });
 
-  $('#share').addEventListener('click', async () => {
-    const ok = await copyToClipboard(shareText(ui.game));
-    $('#share').textContent = ok ? 'Copied' : 'Select and copy';
-    setTimeout(() => { $('#share').textContent = 'Copy result'; }, 1600);
-  });
+  $('#hint').addEventListener('click', onHint);
+  $('#show').addEventListener('click', onShow);
 
   $('#help-btn').addEventListener('click', () => { fillHelp(); $('#help').showModal(); });
   $('#help-close').addEventListener('click', () => $('#help').close());

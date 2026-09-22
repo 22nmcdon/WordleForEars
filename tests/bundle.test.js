@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MODE_IDS } from '../src/modes/index.js';
-import { MODULES } from '../scripts/modules.mjs';
+import { MODULES, moduleOrder, stranded, allSources } from '../scripts/modules.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const run = promisify(execFile);
@@ -50,6 +50,60 @@ test('no two modules declare the same top-level name', async () => {
       owner.set(name, path);
     }
   }
+});
+
+/* --- the module list ------------------------------------------------------ */
+
+test('the order is the one the imports say it is', async () => {
+  // It used to be hand-written, and a hand-written order of nearly fifty files
+  // has two silent failure modes: leave a file out and the page dies at run
+  // time on the first name nothing declared; put one in the wrong place and
+  // it is not an error at all, it is a control that comes up empty.
+  const order = await moduleOrder();
+  const at = new Map(order.map((path, i) => [path, i]));
+
+  for (const path of order) {
+    const source = await readFile(join(root, 'src', path), 'utf8');
+    const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+
+    for (const [, target] of source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+      const parts = (folder ? folder.split('/') : []).concat(target.split('/'));
+      const out = [];
+      for (const part of parts) {
+        if (part === '.' || part === '') continue;
+        if (part === '..') out.pop();
+        else out.push(part);
+      }
+      const wanted = out.join('/');
+
+      assert.ok(at.has(wanted), `${path} imports ${wanted}, which is not in the bundle`);
+      assert.ok(at.get(wanted) < at.get(path),
+        `${wanted} is flattened after ${path}, which imports it`);
+    }
+  }
+
+  assert.equal(order.at(-1), 'main.js', 'the entry point is flattened last');
+  assert.equal(new Set(order).size, order.length, 'a module appears once');
+});
+
+test('nothing under src/ is stranded', async () => {
+  // The inverse of the old check, and the one it could never make: the list is
+  // now the closure of what main.js imports, so "you forgot to add it" cannot
+  // happen - but "you wrote it and never wired it up" still can, and used to
+  // look exactly like a file that was deliberately left out.
+  assert.deepEqual(await stranded(), [], 'these files are not reachable from main.js');
+
+  const every = await allSources();
+  assert.equal(MODULES.length, every.length);
+  assert.deepEqual([...MODULES].sort(), every, 'the bundle carries every source file');
+});
+
+test('the bundle builds from an order derived fresh, not a cached one', async () => {
+  // MODULES is computed at import time. If the derivation were somehow
+  // order-dependent - on the filesystem's directory order, say - two runs
+  // would disagree, and the one that disagreed would be the published one.
+  assert.deepEqual(await moduleOrder(), MODULES);
+  assert.deepEqual(await moduleOrder(), await moduleOrder());
 });
 
 test('the bundle says what encoding it is in', async () => {

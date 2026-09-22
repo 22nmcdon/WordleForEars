@@ -90,9 +90,10 @@ test('each tool’s DSP points at the notes that explain it', () => {
 });
 
 test('every notes file is in the bundle', () => {
-  // The module list is hand-ordered, and a file left out of it is not a build
-  // error - it is a page where that tool silently has no notes.
+  // The list is derived from what main.js imports now, so a file can no longer
+  // be left out by hand - but it can be left unimported, which comes to the
+  // same thing: a page where that tool silently has no notes.
   for (const file of readdirSync(new URL('../src/notes', import.meta.url))) {
-    assert.ok(MODULES.includes(`notes/${file}`), `notes/${file} is not in MODULES`);
+    assert.ok(MODULES.includes(`notes/${file}`), `notes/${file} is not reachable from main.js`);
   }
 });

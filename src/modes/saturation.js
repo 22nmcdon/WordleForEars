@@ -197,6 +197,30 @@ export default {
           narrow: true,
         },
       ],
+      why: [
+        {
+          label: 'Harmonics, yours',
+          value: `${mine.thd.toFixed(2)} dB`,
+          how: 'Everything the saturator added, against the note it was given. '
+             + 'Measured by running a bin-aligned sine through the curve and '
+             + 'reading the harmonics that come back - the curve, not the loop, '
+             + 'so the reading does not move with the material.',
+        },
+        {
+          label: 'Harmonics, wanted',
+          value: `${theirs.thd.toFixed(2)} dB`,
+          how: 'The same measurement on the target curve. Compared as a total '
+             + 'rather than harmonic by harmonic, because this exercise asks how '
+             + 'hard it is pushed, not what colour it is.',
+        },
+        {
+          label: 'Matched at',
+          value: `${close.toFixed(1)} dB or less`,
+          how: 'Note that the top of the drive range is a poor place to hunt: '
+             + 'everything becomes a square wave up there, so a decibel of '
+             + 'control costs several decibels of drive.',
+        },
+      ],
     };
   },
 
@@ -219,6 +243,32 @@ export default {
           text: gap.off <= close ? 'that is the colour'
             : `${Math.abs(gap.louder).toFixed(1)} dB too ${gap.louder > 0 ? 'much' : 'little'} `
               + `${ordinal(gap.where)} harmonic`,
+        },
+      ],
+      why: [
+        {
+          label: 'Worst harmonic',
+          value: gap.where === null ? 'none of them stands out'
+               : `the ${ordinal(gap.where)}, ${gap.off.toFixed(2)} dB out`,
+          how: 'The harmonics are read one by one up to the tenth, and this is '
+             + 'the one furthest from the target. The worst rather than the '
+             + 'average, because an average over nine says nothing when one is in '
+             + 'completely the wrong place and the other eight are right. '
+             + 'Harmonics that would be buried under their neighbours in either '
+             + 'curve are left out of the comparison.',
+        },
+        {
+          label: 'Even against odd',
+          value: `${mine.even.toFixed(1)} even, ${mine.odd.toFixed(1)} odd`,
+          how: 'Even harmonics are octaves and fifths of what went in, and read '
+             + 'as warmth. Odd ones are the ones that read as grit. Bias is what '
+             + 'moves the balance between them; drive mostly moves both.',
+        },
+        {
+          label: 'Total',
+          value: `${mine.thd.toFixed(1)} dB, target ${theirs.thd.toFixed(1)}`,
+          how: 'How hard it is pushed overall. Getting this right and the colour '
+             + 'wrong is the usual shape of a near miss here.',
         },
       ],
     };
@@ -261,6 +311,32 @@ export default {
             : `only ${lead.toFixed(1)} dB clear of the grit`,
         },
       ],
+      why: [
+        {
+          label: 'Even harmonics',
+          value: `${mine.even.toFixed(2)} dB, wanted ${want.toFixed(1)}`,
+          how: 'The second, fourth, sixth and so on added together. These are '
+             + 'octaves and fifths of what went in, which is why they read as '
+             + 'warmth rather than as distortion.',
+        },
+        {
+          label: 'Clear of the grit',
+          value: `${lead.toFixed(2)} dB, wanted ${wanted} or more`,
+          how: 'The even harmonics above the odd ones. Two readings rather than '
+             + 'one, because either alone has a wrong answer that passes it: '
+             + 'driving it hard gets the even harmonics to any level you like and '
+             + 'brings a pile of odd ones with them, and doing almost nothing '
+             + 'stays clean with no warmth in it at all.',
+        },
+        {
+          label: 'Odd harmonics',
+          value: `${mine.odd.toFixed(2)} dB`,
+          how: 'The third, fifth, seventh and so on. The only way through this '
+             + 'exercise is the quiet end of the drive with the bias doing the '
+             + 'work - asymmetry is what makes even harmonics; hard clipping is '
+             + 'what makes odd ones.',
+        },
+      ],
     };
   },
 
@@ -281,10 +357,11 @@ export default {
 
     return {
       guess: () => ({ ...settings }),
-      reveal: () => {
+      reveal: ({ live = false } = {}) => {
         if (puzzle.answer) plugin.showTarget({ ...HEAT_DEFAULTS, ...puzzle.answer });
-        plugin.lock();
+        if (!live) plugin.lock();
       },
+      unlock: () => plugin.unlock(),
       toggle: () => plugin.toggle(),
       destroy: () => plugin.destroy(),
     };
@@ -296,6 +373,42 @@ export default {
 
   play() {
     // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  /** The way out, in two rungs, worked out from the answer. */
+  hints(answer, tier, puzzle) {
+    const exercise = puzzle?.settings?.exercise ?? 'amount';
+
+    if (exercise === 'even') {
+      return [
+        'You will not get there by driving it harder: past a point the odd '
+          + 'harmonics come up faster than the even ones, and both readings have '
+          + 'to be right at once.',
+        'Quiet drive, plenty of bias. Asymmetry is what makes even harmonics; '
+          + 'clipping evenly top and bottom is what makes odd ones.',
+      ];
+    }
+
+    const settings = { ...HEAT_DEFAULTS, ...answer };
+    if (exercise === 'amount') {
+      return [
+        settings.drive < 6 ? 'It is only just dirty - a decibel or two of drive.'
+          : settings.drive < 14 ? 'It is pushed, but not hard: somewhere in the middle.'
+          : 'It is driven hard.',
+        'Work up from clean rather than down from the top. Everything becomes a '
+          + 'square wave up there, so the top of the range is nearly flat and a '
+          + 'decibel of reading costs several decibels of drive.',
+      ];
+    }
+
+    return [
+      `The bias is ${settings.bias < 0.15 ? 'near zero, so it is mostly odd harmonics'
+        : settings.bias < 0.5 ? 'part way up - some warmth under the grit'
+        : 'well up, so the even harmonics lead'}.`,
+      `Around ${settings.drive.toFixed(0)} dB of drive, `
+        + `${settings.hardness < 1 ? 'soft rather than hard' : 'on the harder side'}`
+        + `${settings.mix < 1 ? `, and pulled back to about ${Math.round(settings.mix * 100)}% mix` : ''}.`,
+    ];
   },
 
   reveal(answer, tier, puzzle) {

@@ -5,6 +5,7 @@ import {
 import { EchoPlugin } from '../echo/plugin.js';
 import { profileDistance } from '../fx/response.js';
 import { writeMs } from '../fx/panel.js';
+import { LOOP_BEAT } from '../audio.js';
 import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
 
 /**
@@ -173,6 +174,28 @@ export default {
             : 'the right time, the wrong delay',
         },
       ],
+      why: [
+        {
+          label: 'Repeats, compared',
+          value: `${error.toFixed(2)} dB apart`,
+          how: 'Both delays are built and their repeats read in three bands over '
+             + 'time - where each echo lands, how loud it is, and what the tone '
+             + 'control has taken off it by then. Built from numbers rather than '
+             + 'recorded, so this comes out the same on every machine.',
+        },
+        {
+          label: 'Time',
+          value: `${this.howFar(timing)} too ${timing > 0 ? 'long' : 'short'}`,
+          how: 'Compared as a ratio, not in milliseconds: a hundred milliseconds '
+             + 'out is a different mistake at a sixteenth than it is at a quarter.',
+        },
+        {
+          label: 'Feedback',
+          value: `${Math.round(Math.abs(back) * 100)}% too ${back > 0 ? 'much' : 'little'}`,
+          how: 'How much of each repeat goes back in - how many you get before '
+             + 'they die away, rather than how loud the first one is.',
+        },
+      ],
     };
   },
 
@@ -202,6 +225,30 @@ export default {
         {
           state: locked ? HIT : Math.abs(off) <= close * 2.5 ? NEAR : MISS,
           text: locked ? `that is ${answer.division}` : `too ${off > 0 ? 'long' : 'short'}`,
+        },
+      ],
+      why: [
+        {
+          label: 'Time',
+          value: `${writeMs(settings.time)}, wanted ${writeMs(answer.time)}`,
+          how: `The answer is ${answer.division} at this tempo, worked out from the `
+             + 'loop rather than from the number on the control - which is why '
+             + 'the delay reads as locked when it falls in with the drums and '
+             + 'not when it lands on a round figure.',
+        },
+        {
+          label: 'Out by',
+          value: `${off.toFixed(3)} octaves - ${this.howFar(off)}`,
+          how: 'Heard as a ratio, so compared as one. Only the time is read, '
+             + 'because only the time was asked about: the feedback and the tone '
+             + 'are yours to set to whatever makes the repeats easiest to hear, '
+             + 'which is what anybody does when they are hunting for a tempo.',
+        },
+        {
+          label: 'Locked at',
+          value: `${(close * 100).toFixed(1)}% of an octave`,
+          how: 'How far off the subdivision still counts as in time. It tightens '
+             + 'with the tier.',
         },
       ],
     };
@@ -234,10 +281,11 @@ export default {
 
     return {
       guess: () => ({ ...settings }),
-      reveal: () => {
+      reveal: ({ live = false } = {}) => {
         plugin.showTarget({ ...ECHO_DEFAULTS, ...puzzle.answer });
-        plugin.lock();
+        if (!live) plugin.lock();
       },
+      unlock: () => plugin.unlock(),
       toggle: () => plugin.toggle(),
       destroy: () => plugin.destroy(),
     };
@@ -249,6 +297,33 @@ export default {
 
   play() {
     // The loop runs inside the plugin, under the player's own hands.
+  },
+
+  /** The way out, in two rungs, worked out from the answer. */
+  hints(answer, tier, puzzle) {
+    const settings = { ...ECHO_DEFAULTS, ...answer };
+
+    if ((puzzle?.settings?.exercise ?? 'match') === 'find') {
+      const beats = answer.time / (LOOP_BEAT * 1000);
+      return [
+        `It is a ${beats >= 0.9 ? 'long' : beats >= 0.45 ? 'medium' : 'short'} `
+          + 'subdivision - count it against the drums rather than reading the '
+          + 'number.',
+        `It is ${answer.division.includes('triplet') ? 'a triplet'
+          : answer.division.includes('dotted') ? 'dotted' : 'straight'}, `
+          + `and around ${writeMs(answer.time)} at this tempo.`,
+      ];
+    }
+
+    const near = nearestDivision(settings.time);
+    return [
+      `The time is about ${writeMs(settings.time)}`
+        + `${near && near.off < 0.02 ? ` - which is ${near.division.label}` : ''}.`,
+      `Around ${Math.round(settings.feedback * 100)}% going back in, so `
+        + `${settings.feedback > 0.55 ? 'a long tail of repeats'
+          : settings.feedback > 0.3 ? 'a few audible repeats' : 'barely more than a slap'}`
+        + `${settings.pingPong ? ', and it alternates across the stereo field' : ''}.`,
+    ];
   },
 
   reveal(answer, tier, puzzle) {

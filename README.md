@@ -8,7 +8,11 @@ the browser.
 your settings against the target as often as you like, and submit when you
 think you are on it. Each reading tells you how far off and *which way* —
 `2.8 oct high`, `3.5 dB shy`, `1.7× soft` — so the next attempt is an
-adjustment rather than a guess.
+adjustment rather than a guess. There is no limit on attempts and nothing to
+run out of; when you are stuck, **Hint** says what kind of move it is and
+roughly where, and **Show me** draws the answer on the tool and *leaves the
+controls live*, so you can hear your way onto it. Every reading also carries
+its own working — what was measured, what it came to, and how.
 
 Every claim this app makes about audio was checked by rendering it offline and
 measuring, which is also how a good number of its own bugs were found. Where a
@@ -17,9 +21,11 @@ measured.
 
 > **Mid-restructure.** This began as a Wordle with four music-theory modes
 > alongside the plugins. Those are gone — naming a half-diminished seventh is
-> musicianship, not production. What replaces them (identification drills, an
-> analysis pillar, an optional guided path) is being built in stages, and guess
-> ceilings, streaks and the share grid are on their way out.
+> musicianship, not production — and so are the guess ceiling and the share
+> grid: a tool you can only touch four times is not a tool, and the whole
+> content of the grid was "I did it in three". What replaces them
+> (identification drills, an analysis pillar, an optional guided path) is being
+> built in stages. Streaks are still here and are next out.
 
 | Mode | What you work with | Exercises |
 | --- | --- | --- |
@@ -160,12 +166,19 @@ that doing it right is audible rather than merely scored:
 
 ## Adding a mode
 
-A mode is data and seven functions in `src/modes/`, registered in
+A mode is data and eight functions in `src/modes/`, registered in
 `src/modes/index.js`. It says what it asks (`slots`), how to make a puzzle
 (`makePuzzle`), how to read a guess (`score`), what to play (`clues` + `play`),
-and what the answer was (`reveal`, `weak`). Nothing else in the app knows which
-mode is showing — the board, the picker, the share grid and the stats are all
-built from what the mode returns.
+what to say when somebody is stuck (`hints`), and what the answer was
+(`reveal`, `weak`). Nothing else in the app knows which mode is showing — the
+log, the picker and the stats are all built from what the mode returns.
+
+A `score` may also return `why`: an ordered list of `{label, value, how}`, shown
+under the attempt in the log. Every scorer here already worked out more than
+the two cells it printed — the frequency two curves part company at, how much
+of a compressor's gap is depth and how much is timing, what summing to mono
+costs down low — and then discarded it. `how` is drawn from the
+measured-justification comment already sitting above the tolerance constant.
 
 A slot is one of two kinds. `choice` gives a list of options and renders as
 chips; `range` gives `min`, `max`, a `format` for writing the value down, and
@@ -175,9 +188,10 @@ committed.
 
 A mode can also skip slots entirely and bring its own interface: set
 `surface: true` and implement `mount(el, context)`, returning `guess()`,
-`reveal()` and `destroy()`. That is how the EQ is a plugin rather than a
-picker, and the board, the daily, the attempts and the share grid carry on
-working above it unchanged.
+`reveal({ live })`, `unlock()` and `destroy()`. That is how the EQ is a plugin
+rather than a picker, and the log, the daily and the attempts carry on working
+above it unchanged. `reveal({ live: true })` is **Show me**: it draws the
+target and does *not* lock the controls.
 
 `tests/modes.test.js` holds every mode to that contract: that its own answer
 scores green in every cell, that every answer it can generate is answerable from
@@ -221,15 +235,14 @@ src/echo/ heat/
 src/fx/             what more than one tool needs: FFT, impulse response
                     reading, the shared panel furniture, worklet stringifying
 src/notes/          what each tool is for, in prose, for the person using it
-src/bench/          the workbench shell - the picker, and more to come
+src/bench/          the workbench shell - the picker, the attempt log
 src/modes/          one file per exercise set, plus the shared scoring vocabulary
 src/random.js       seeded PRNG + daily numbering
 src/game.js         the round, over whichever tool is asking (pure, no DOM)
 src/stats.js        localStorage persistence, per tool and tier
-src/share.js        emoji result grid (on its way out)
 src/engrave.js      accidentals, set properly
 src/main.js         DOM wiring
-scripts/            the single-file bundler, and the module order it uses
+scripts/            the single-file bundler, and the module order it derives
 tests/              node:test coverage of all of the above
 ```
 
