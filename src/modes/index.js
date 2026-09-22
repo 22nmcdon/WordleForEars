@@ -1,8 +1,4 @@
-import chords from './chords.js';
-import pitch from './pitch.js';
-import intervals from './intervals.js';
 import eq from './eq.js';
-import rhythm from './rhythm.js';
 import panning from './panning.js';
 import compression from './compression.js';
 import reverb from './reverb.js';
@@ -10,15 +6,23 @@ import delay from './delay.js';
 import saturation from './saturation.js';
 
 /**
- * The suite, in the order the project plan builds it: the two named modes
- * first, then the stretch ones, then the production plugins. A mode is data
- * and a handful of functions - what it asks, how it sounds, how a guess is
- * read - and the shell around it does not know which one it is showing.
+ * The tools.
+ *
+ * There were four more until recently - name the chord, name the note, name
+ * the interval, name the figure - and they went because they were the wrong
+ * subject. A producer can have a very good pair of ears and never name a
+ * half-diminished seventh; that is musicianship, and this is not a
+ * musicianship trainer.
+ *
+ * What replaces them asks the same shape of question about the right subject:
+ * which band is boosted, how much reduction is that, even harmonics or odd.
+ * That is production, it is what an ear actually has to learn here, and it is
+ * measurable with the DSP already in this repository.
  */
 export const MODES = {
-  chords, pitch, intervals, eq, rhythm, panning, compression, reverb, delay, saturation,
+  eq, compression, panning, reverb, delay, saturation,
 };
 
 export const MODE_IDS = Object.keys(MODES);
 
-export const modeOf = (id) => MODES[id] ?? MODES.chords;
+export const modeOf = (id) => MODES[id] ?? MODES.eq;

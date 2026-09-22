@@ -33,8 +33,8 @@ export const LOOP_BEAT = 60 / LOOP_BPM;
  * The kit, as recipes: where the noise is filtered and how long it rings.
  *
  * `level` is set so that one hit at level 1 comes out where a record would
- * put it - kick loudest, snare a couple of decibels under it, hats well down,
- * the count-in click in between. It has to be set rather than guessed,
+ * put it - kick loudest, snare a couple of decibels under it, hats well
+ * down. It has to be set rather than guessed,
  * because these pieces are made in completely different ways: the kick is an
  * oscillator and comes out at whatever it is told, while the others are a
  * burst of noise through a narrow band, where nearly all of what goes in is
@@ -44,16 +44,15 @@ export const LOOP_BEAT = 60 / LOOP_BPM;
  * call site with numbers like `level: 5`.
  *
  * Measured, one hit at a time, rendered offline: kick -6.2 dBFS peak,
- * snare -8, hat -24, click -15. The three noise pieces wander by a decibel
- * or so from render to render, because the burst is taken from a random
- * point of the noise buffer at a random speed - which is what stops eight
- * hats in a row sounding like one hat eight times.
+ * snare -8, hat -24. The two noise pieces wander by a decibel or so from
+ * render to render, because the burst is taken from a random point of the
+ * noise buffer at a random speed - which is what stops eight hats in a row
+ * sounding like one hat eight times.
  */
 const KIT = {
   kick: { thump: 92, to: 44, decay: 0.24, level: 1.0 },
   snare: { hz: 1900, q: 0.8, decay: 0.16, level: 2.9 },
   hat: { hz: 9000, q: 1.1, decay: 0.05, level: 0.55 },
-  click: { hz: 2400, q: 1.4, decay: 0.035, level: 3.0 },
 };
 
 export class Engine {
@@ -431,27 +430,5 @@ export class Engine {
     source.start(0);
     source.stop(seconds);
     this.keep({ gain, endsAt: seconds, stop: (when) => source.stop(when) });
-  }
-
-  /** A pattern of strikes, at beat positions, after a count-in of clicks. */
-  playPattern(beats, { bpm = 100, dest = null, countIn = 4, at = null } = {}) {
-    this.ensure();
-    const beat = 60 / bpm;
-    const start = at ?? this.start;
-
-    // The first click of the count-in is the one you set your foot by, so it
-    // is a little louder than the three that follow. The corrections that used
-    // to be here are gone: the kit's own levels now mean something, so asking
-    // for one is enough.
-    for (let i = 0; i < countIn; i += 1) {
-      this.drum('click', start + i * beat, { dest, level: i === 0 ? 1.3 : 0.75 });
-    }
-
-    const patternAt = start + countIn * beat;
-    for (const position of beats) {
-      this.drum('snare', patternAt + position * beat, { dest, level: 1 });
-    }
-
-    return patternAt;
   }
 }

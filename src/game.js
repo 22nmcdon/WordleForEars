@@ -11,21 +11,6 @@ export const MAX_GUESSES = Math.max(
 export const guessesFor = (mode, tier) => modeOf(mode).tiers[tier].guesses;
 
 /**
- * Every setting the slots of a tier can be in - what a guess count is measured
- * against. A control you dial counts the positions it can stop on, which for a
- * log control is however many steps its slider has.
- */
-export function combinationsFor(mode, tier) {
-  return modeOf(mode).slots(tier).reduce((total, slot) => {
-    if (slot.kind !== 'range') return total * slot.options.length;
-    const positions = slot.log
-      ? Math.round(Math.log2(slot.max / slot.min) / 0.02)
-      : Math.round((slot.max - slot.min) / slot.step) + 1;
-    return total * positions;
-  }, 1);
-}
-
-/**
  * Read a guess against the answer, through the mode that asked the question.
  *
  * The whole puzzle goes along with the answer, because a mode may need more
@@ -56,7 +41,7 @@ export function settingsFor(mode, chosen = {}) {
  * the sound of it: an EQ exercise that hands you a fault to cure is a
  * different puzzle from one that hands you a target to match.
  */
-export function makePuzzle({ mode = 'chords', tier = 'easy', settings = {}, seed }) {
+export function makePuzzle({ mode = 'eq', tier = 'easy', settings = {}, seed }) {
   const rng = mulberry32(hashSeed(seed));
   const chosen = settingsFor(mode, settings);
 

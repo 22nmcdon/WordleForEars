@@ -12,29 +12,48 @@ globalThis.localStorage = {
 
 const { getStats, recordGame, dailyResult, weakestKind, resetStats } = await import('../src/stats.js');
 const { createGame, submitGuess, makePuzzle, MAX_GUESSES } = await import('../src/game.js');
-const { TIERS } = await import('../src/theory.js');
+const { MODES } = await import('../src/modes/index.js');
 
-const puzzleFor = (quality, seed = 's') => (
-  { mode: 'chords', tier: 'easy', setting: 'root', seed,
-    answer: { root: 0, quality }, spin: 0, octave: 4 }
+// These used to be chord puzzles, because a chord quality is the simplest
+// thing a mode can call "one kind of answer". The chords are gone, so they are
+// EQ puzzles now: a single corrective band, whose frequency the EQ mode sorts
+// into a named trouble zone - mud, boxiness, honk, harshness - which is
+// exactly the same job the quality was doing and on a subject this app is
+// actually about.
+const bandAt = (frequency, gain = 6) => [{ type: 'peaking', frequency, gain, q: 1.4, on: true }];
+
+const MUD = 250;
+const HONK = 1600;
+const HARSH = 4000;
+
+const puzzleFor = (frequency, seed = 's') => (
+  { mode: 'eq', tier: 'easy', settings: { exercise: 'match' }, seed, answer: bandAt(frequency) }
 );
 
-function play(puzzle, qualities, playing = 'practice') {
+/**
+ * Enough losing guesses to run a round out.
+ *
+ * As many as the tier allows, all of them a long way from the answer and all
+ * of them different, because a repeat is refused without burning a turn.
+ */
+const wrongFor = (frequency, tries = MODES.eq.tiers.easy.guesses) => Array.from(
+  { length: tries },
+  (_, i) => bandAt(frequency > 1000 ? 50 + i * 4 : 8000 + i * 400, -11),
+);
+
+function play(puzzle, guesses, playing = 'practice') {
   let game = createGame(puzzle, { mode: playing });
-  for (const quality of qualities) game = submitGuess(game, { quality });
+  for (const guess of guesses) game = submitGuess(game, guess);
   recordGame(game);
   return game;
 }
 
-/** Three qualities that are not the answer - enough to lose an Easy round. */
-const wrongFor = (quality) => TIERS.easy.qualities.filter((q) => q !== quality).slice(0, 3);
-
 test.beforeEach(() => resetStats());
 
 test('a win records a streak and lands in the right distribution bucket', () => {
-  play(puzzleFor('major'), ['minor', 'major']);
+  play(puzzleFor(MUD), [bandAt(9000, -9), bandAt(MUD)]);
 
-  const stats = getStats('practice', 'chords', 'easy');
+  const stats = getStats('practice', 'eq', 'easy');
   assert.equal(stats.played, 1);
   assert.equal(stats.won, 1);
   assert.equal(stats.streak, 1);
@@ -43,10 +62,10 @@ test('a win records a streak and lands in the right distribution bucket', () => 
 });
 
 test('a loss breaks the streak but keeps the best', () => {
-  play(puzzleFor('major'), ['major']);
-  play(puzzleFor('diminished', 's2'), wrongFor('diminished'));
+  play(puzzleFor(MUD), [bandAt(MUD)]);
+  play(puzzleFor(HARSH, 's2'), wrongFor(HARSH));
 
-  const stats = getStats('practice', 'chords', 'easy');
+  const stats = getStats('practice', 'eq', 'easy');
   assert.equal(stats.played, 2);
   assert.equal(stats.won, 1);
   assert.equal(stats.streak, 0);
@@ -54,49 +73,49 @@ test('a loss breaks the streak but keeps the best', () => {
 });
 
 test('a finished daily is stored so it cannot be replayed', () => {
-  const puzzle = puzzleFor('sus4', 'daily:chords:easy:2026-09-21');
+  const puzzle = puzzleFor(HONK, 'daily:eq:easy:2026-09-21');
   assert.equal(dailyResult(puzzle), null);
-  play(puzzle, ['major', 'sus4'], 'daily');
+  play(puzzle, [bandAt(60, -9), bandAt(HONK)], 'daily');
 
   const saved = dailyResult(puzzle);
   assert.equal(saved.status, 'won');
-  assert.deepEqual(saved.guesses, [{ quality: 'major' }, { quality: 'sus4' }]);
-  assert.equal(dailyResult(puzzleFor('sus4', 'daily:chords:easy:2026-09-22')), null);
+  assert.equal(saved.guesses.length, 2);
+  assert.equal(saved.guesses[1][0].frequency, HONK, 'the winning guess is what was stored');
+  assert.equal(dailyResult(puzzleFor(HONK, 'daily:eq:easy:2026-09-22')), null);
 });
 
 test('the weak-spot hint waits for enough data, then names the worst kind of answer', () => {
-  assert.equal(weakestKind(getStats('practice', 'chords', 'easy')), null, 'no hint from one game');
+  assert.equal(weakestKind(getStats('practice', 'eq', 'easy')), null, 'no hint from one game');
 
-  for (let i = 0; i < 3; i += 1) play(puzzleFor('diminished', `d${i}`), wrongFor('diminished'));
-  play(puzzleFor('major', 'm1'), ['major']);
+  for (let i = 0; i < 3; i += 1) play(puzzleFor(HARSH, `d${i}`), wrongFor(HARSH));
+  play(puzzleFor(MUD, 'm1'), [bandAt(MUD)]);
 
-  const weak = weakestKind(getStats('practice', 'chords', 'easy'));
-  assert.equal(weak.key, 'diminished');
-  assert.equal(weak.label, 'Diminished');
+  const weak = weakestKind(getStats('practice', 'eq', 'easy'));
+  assert.equal(weak.key, 'harshness');
+  assert.equal(weak.label, 'harshness');
   assert.equal(weak.rate, 0);
 });
 
 test('unfinished games are not recorded', () => {
-  const puzzle = makePuzzle({ tier: 'easy', seed: 'unfinished' });
-  const wrong = TIERS.easy.qualities.find((q) => q !== puzzle.answer.quality);
-  recordGame(submitGuess(createGame(puzzle), { quality: wrong }));
-  assert.equal(getStats('practice', 'chords', 'easy').played, 0);
+  const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', seed: 'unfinished' });
+  recordGame(submitGuess(createGame(puzzle), bandAt(9000, -9)));
+  assert.equal(getStats('practice', 'eq', 'easy').played, 0);
 });
 
 test('a bucket is its own per mode, so the modes do not pool their streaks', () => {
-  play(puzzleFor('major'), ['major']);
-  assert.equal(getStats('practice', 'chords', 'easy').played, 1);
-  assert.equal(getStats('practice', 'eq', 'easy').played, 0, 'EQ has played nothing');
-  assert.equal(getStats('daily', 'chords', 'easy').played, 0, 'nor has the daily');
+  play(puzzleFor(MUD), [bandAt(MUD)]);
+  assert.equal(getStats('practice', 'eq', 'easy').played, 1);
+  assert.equal(getStats('practice', 'reverb', 'easy').played, 0, 'the reverb has played nothing');
+  assert.equal(getStats('daily', 'eq', 'easy').played, 0, 'nor has the daily');
 });
 
 test('a bucket makes room for the longest tier in the suite', () => {
-  assert.equal(getStats('practice', 'chords', 'easy').distribution.length, MAX_GUESSES);
+  assert.equal(getStats('practice', 'eq', 'easy').distribution.length, MAX_GUESSES);
 });
 
 test('corrupt storage degrades to empty stats instead of throwing', () => {
   localStorage.setItem('harmonle.stats.v1', '{not json');
-  const stats = getStats('practice', 'chords', 'easy');
+  const stats = getStats('practice', 'eq', 'easy');
   assert.equal(stats.played, 0);
   assert.deepEqual(stats.distribution, new Array(MAX_GUESSES).fill(0));
 });

@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MODE_IDS } from '../src/modes/index.js';
+import { MODULES } from '../scripts/modules.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const run = promisify(execFile);
@@ -34,11 +35,11 @@ test('the bundle builds, parses, and carries the whole app', async () => {
 test('no two modules declare the same top-level name', async () => {
   // The same check the bundler runs, asserted here so the failure arrives with
   // the test suite rather than at publishing time.
+  // Every module the bundle carries, not a copy of the list. A hand-kept copy
+  // goes stale the moment a file moves, and then this check quietly stops
+  // checking the files it was written for.
   const sources = await Promise.all(
-    ['theory.js', 'random.js', 'engrave.js', 'audio.js', 'game.js', 'stats.js', 'share.js', 'main.js',
-     'modes/scoring.js', 'modes/index.js', 'modes/chords.js', 'modes/pitch.js', 'modes/intervals.js',
-     'modes/eq.js', 'modes/rhythm.js', 'modes/panning.js', 'modes/compression.js']
-      .map(async (path) => [path, await readFile(join(root, 'src', path), 'utf8')]),
+    MODULES.map(async (path) => [path, await readFile(join(root, 'src', path), 'utf8')]),
   );
 
   const owner = new Map();

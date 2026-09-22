@@ -95,9 +95,9 @@ export function dailyResult(puzzle) {
 }
 
 /**
- * The plan's "you're weak on half-diminished chords" line, for whichever mode
- * is showing: surface the worst kind of answer once there is enough data for
- * it to mean anything.
+ * The "you keep missing the mud band" line, for whichever tool is showing:
+ * surface the worst kind of answer once there is enough data for it to mean
+ * anything.
  */
 export function weakestKind(stats, minSeen = 3) {
   let worst = null;

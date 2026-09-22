@@ -1,10 +1,11 @@
-// Writing chord symbols the way a chart writes them.
+// Accidentals, set properly.
 //
-// The hand face has no flat or sharp glyph, so accidentals are borrowed from
-// the serif at 0.82em - the same trick the branding calls for. Extensions ride
-// above the baseline at 0.74em when they follow letters ("maj7", "m7b5"); a
-// symbol that is all figures ("7#9", "13") stays at full size, because raising
-// the whole thing would leave nothing on the line.
+// This began as a chord-symbol engraver, with extensions riding above the
+// baseline and accidentals borrowed from the serif because the hand face has
+// no flat or sharp glyph. The chord symbols are gone and the hard part stayed:
+// deciding whether the b in a piece of text is a flat or a letter, which turns
+// out to matter far more for a tool that writes sentences than it ever did for
+// one that wrote "m7b5".
 
 const FLAT = '♭';
 const SHARP = '♯';
@@ -58,26 +59,6 @@ function writeWithAccidentals(parent, text) {
   flush();
 }
 
-/** Engraves a chord quality symbol - "maj7", "m7♭5", "7♯5♯9" - into @p target. */
-export function engraveSymbol(target, symbol) {
-  target.textContent = '';
-
-  const split = /^([^0-9]+)([0-9].*)$/.exec(symbol);
-
-  if (!split) {
-    writeWithAccidentals(target, symbol);
-    return target;
-  }
-
-  writeWithAccidentals(target, split[1]);
-
-  const extension = document.createElement('span');
-  extension.className = 'ext';
-  writeWithAccidentals(extension, split[2]);
-  target.appendChild(extension);
-  return target;
-}
-
 /** A note name - "C", "A♯/B♭" - with the second spelling set quieter. */
 export function engraveNote(target, label) {
   target.textContent = '';
@@ -90,24 +71,6 @@ export function engraveNote(target, label) {
     alt.className = 'alt';
     writeWithAccidentals(alt, '/' + second);
     target.appendChild(alt);
-  }
-
-  return target;
-}
-
-/** The whole chord, root and quality, as one engraved symbol. */
-export function engraveChord(target, rootLabel, symbol) {
-  target.textContent = '';
-
-  const root = document.createElement('span');
-  engraveNote(root, rootLabel);
-  target.appendChild(root);
-
-  if (symbol) {
-    const quality = document.createElement('span');
-    quality.className = 'quality-symbol';
-    engraveSymbol(quality, symbol);
-    target.appendChild(quality);
   }
 
   return target;

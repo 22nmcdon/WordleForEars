@@ -1,10 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { QUALITIES, TIERS, shapeOf, chordName, chordPitchClasses, voiceChord } from '../src/theory.js';
 import { MODES, modeOf } from '../src/modes/index.js';
 import {
-  MAX_GUESSES, guessesFor, combinationsFor, scoreGuess,
+  MAX_GUESSES, guessesFor, scoreGuess,
   createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal, settingsFor,
 } from '../src/game.js';
 import { mulberry32, hashSeed, puzzleNumber, dayKey } from '../src/random.js';
@@ -12,46 +11,10 @@ import { shareText } from '../src/share.js';
 import { answerAsGuess, wrongGuess } from './helpers.js';
 
 
-/* --- theory, which the chords mode is built on --------------------------- */
-
-test('every quality starts on the root and has unique intervals', () => {
-  for (const [id, quality] of Object.entries(QUALITIES)) {
-    assert.equal(quality.intervals[0], 0, `${id} must include the root`);
-    assert.equal(new Set(quality.intervals).size, quality.intervals.length, `${id} has duplicates`);
-    assert.ok(quality.intervals.every((i, n) => n === 0 || i > quality.intervals[n - 1]), `${id} unsorted`);
-  }
-});
-
-test('a chord shape is what sits above the root, folded into an octave', () => {
-  assert.deepEqual(shapeOf('major'), new Set([4, 7]));
-  assert.deepEqual(shapeOf('halfDim7'), new Set([3, 6, 10]));
-  // A 9th is a 2nd and a 13th is a 6th, to the ear the chord is played with.
-  assert.deepEqual(shapeOf('dom9'), new Set([2, 4, 7, 10]));
-  assert.deepEqual(shapeOf('dom13'), new Set([2, 4, 7, 9, 10]));
-});
-
-test('voicings keep the chord notes but change the arrangement', () => {
-  const chord = { root: 0, quality: 'dom7' };
-  const expected = chordPitchClasses(chord);
-  for (const voicing of ['root', 'inversion', 'open']) {
-    const notes = voiceChord(chord, voicing, 4, 1);
-    assert.deepEqual(new Set(notes.map((n) => n % 12)), expected);
-    assert.deepEqual([...notes].sort((x, y) => x - y), notes, 'notes come back low to high');
-    assert.ok(notes.every((n) => n >= 36 && n <= 96), 'notes stay in a playable range');
-  }
-  assert.notDeepEqual(voiceChord(chord, 'root'), voiceChord(chord, 'open'));
-});
-
-test('chord names read the way players say them', () => {
-  assert.equal(chordName({ root: 0, quality: 'major' }), 'C major');
-  assert.equal(chordName({ root: 9, quality: 'min7' }), 'A m7');
-  assert.equal(chordName({ root: 10, quality: 'halfDim7' }), 'A♯/B♭ m7♭5');
-});
-
 /* --- the round, whichever mode is asking --------------------------------- */
 
 test('a correct guess wins and stops accepting input', () => {
-  const puzzle = makePuzzle({ mode: 'chords', tier: 'easy', seed: 'win' });
+  const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', seed: 'win' });
   let game = createGame(puzzle);
 
   game = submitGuess(game, wrongGuess(puzzle));
@@ -81,7 +44,7 @@ test('a tier allows its own number of guesses, and no more', () => {
 });
 
 test('repeating a guess is rejected without burning a turn', () => {
-  const puzzle = makePuzzle({ mode: 'chords', tier: 'medium', seed: 'x' });
+  const puzzle = makePuzzle({ mode: 'eq', tier: 'medium', seed: 'x' });
   const guess = wrongGuess(puzzle);
   let game = submitGuess(createGame(puzzle), guess);
   const repeat = submitGuess(game, { ...guess });
@@ -100,10 +63,11 @@ test('two guesses differing in one control are two different guesses', () => {
 });
 
 test('scoring goes through the mode that asked the question', () => {
-  const puzzle = makePuzzle({ mode: 'rhythm', tier: 'easy', seed: 'route' });
+  const puzzle = makePuzzle({ mode: 'reverb', tier: 'easy', seed: 'route' });
   const score = scoreGuess(answerAsGuess(puzzle), puzzle);
   assert.ok(score.correct);
-  assert.equal(score.cells.length, MODES.rhythm.score(answerAsGuess(puzzle), puzzle.answer, 'easy').cells.length);
+  assert.equal(score.cells.length,
+    MODES.reverb.score(answerAsGuess(puzzle), puzzle.answer, 'easy', puzzle).cells.length);
 });
 
 test('a mode\'s settings fill themselves in, and refuse what it does not offer', () => {
@@ -111,7 +75,7 @@ test('a mode\'s settings fill themselves in, and refuse what it does not offer',
   assert.deepEqual(settingsFor('eq', { exercise: 'fix' }), { exercise: 'fix' });
   assert.deepEqual(settingsFor('eq', { exercise: 'nonsense' }), { exercise: 'match' });
   assert.deepEqual(settingsFor('compression', {}), { exercise: 'match' });
-  assert.deepEqual(settingsFor('rhythm', {}), { tempo: '84' });
+  assert.deepEqual(settingsFor('saturation', {}), { exercise: 'amount' });
 });
 
 /* --- the daily ----------------------------------------------------------- */
@@ -192,15 +156,6 @@ test('puzzles spread across everything a tier offers', () => {
   }
 });
 
-test('chords still move their root about, though it is never guessed', () => {
-  const roots = new Set();
-  for (let i = 0; i < 200; i += 1) {
-    roots.add(makePuzzle({ mode: 'chords', tier: 'easy', seed: `root-${i}` }).answer.root);
-  }
-  assert.equal(roots.size, 12, 'nothing to anchor on');
-  assert.ok(TIERS.easy.qualities.length > 0);
-});
-
 /* --- sharing ------------------------------------------------------------- */
 
 test('the share grid names the mode, counts the guesses and hides the answer', () => {
@@ -225,15 +180,4 @@ test('a lost round shares as X of its allowance', () => {
 
   assert.equal(game.status, 'lost');
   assert.match(shareText(game).split('\n')[0], /Stereo #\d+ · Easy X\/3/);
-});
-
-test('a guess count is never more than the answers to choose from', () => {
-  for (const mode of Object.keys(MODES)) {
-    // A mode you dial on its own interface has no list of answers to count.
-    if (MODES[mode].surface) continue;
-
-    for (const tier of Object.keys(MODES[mode].tiers)) {
-      assert.ok(guessesFor(mode, tier) < combinationsFor(mode, tier), `${mode}/${tier}`);
-    }
-  }
 });

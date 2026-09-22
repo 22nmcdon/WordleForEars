@@ -7,15 +7,14 @@ import { Engine } from './audio.js';
 import { getStats, recordGame, dailyResult, weakestKind, resetStats } from './stats.js';
 import { shareText, copyToClipboard } from './share.js';
 import { puzzleNumber } from './random.js';
-import { engraveSymbol, engraveNote } from './engrave.js';
+import { engraveNote } from './engrave.js';
 import { renderPicker, syncPicker, pickerState, dialValue } from './bench/picker.js';
 import { notesFor } from './notes/index.js';
 
 const $ = (sel) => document.querySelector(sel);
 
-/** Chord symbols are engraved; everything else only needs its accidentals. */
-const writeSymbol = (target, text) =>
-  (mode().handLettered ? engraveSymbol(target, text) : engraveNote(target, text));
+/** A reading only ever needs its accidentals: "3.15k", "B♭", "−4.5 dB". */
+const writeSymbol = (target, text) => engraveNote(target, text);
 
 /* The webfonts, promoted only when this page is being served. `rel` is set with
    the href and never before: a stylesheet with no href counts as one still on
@@ -33,7 +32,7 @@ const engine = new Engine();
 const ui = {
   playing: 'daily', // 'daily' | 'practice'
   surface: null, // a mode that brings its own interface, mounted
-  mode: 'chords',
+  mode: 'eq',
   tier: 'easy',
   chosen: {}, // settings, per mode, so switching back finds them as you left them
   guess: {},
@@ -46,7 +45,7 @@ const settings = () => settingsFor(ui.mode, ui.chosen[ui.mode] ?? {});
 
 /* ---------- setup row ---------- */
 
-/** The seven, on the page rather than behind a click. */
+/** The tools, on the page rather than behind a click. */
 function fillModes() {
   $('#modes').innerHTML = MODE_IDS
     .map((id) => `<button class="mode-pill" type="button" role="radio" data-train="${id}"`
@@ -92,10 +91,7 @@ function buildPicker() {
   ui.guess = { ...dialled, ...Object.fromEntries(
     Object.entries(ui.guess).filter(([id]) => id in dialled)) };
 
-  renderPicker(picker, mode().slots(ui.tier), ui.guess, {
-    write: writeSymbol,
-    hand: mode().handLettered,
-  });
+  renderPicker(picker, mode().slots(ui.tier), ui.guess, { write: writeSymbol });
 
   syncAnswer();
 }
@@ -312,7 +308,7 @@ function finish(game, { replay = true } = {}) {
   played.appendChild(document.createTextNode(won ? 'You heard ' : 'It was '));
 
   const symbol = document.createElement('span');
-  symbol.className = mode().handLettered ? 'symbol hand' : 'symbol';
+  symbol.className = 'symbol';
   writeSymbol(symbol, answer.symbol);
   played.appendChild(symbol);
   played.appendChild(document.createTextNode(answer.name ? ` — ${answer.name}.` : '.'));
@@ -425,7 +421,7 @@ function drawCell(cell) {
   node.className = `cell ${cell.state}`;
 
   const value = document.createElement('span');
-  value.className = cell.symbol && mode().handLettered ? 'value hand' : 'value';
+  value.className = 'value';
   writeSymbol(value, cell.text);
   node.appendChild(value);
   return node;

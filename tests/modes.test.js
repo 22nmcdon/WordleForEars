@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
 import { HIT, NEAR, MISS } from '../src/modes/scoring.js';
 import {
-  makePuzzle, createGame, submitGuess, combinationsFor, reveal, settingsFor, startingGuess,
+  makePuzzle, createGame, submitGuess, reveal, settingsFor, startingGuess,
   scoreGuess,
 } from '../src/game.js';
 import { answerAsGuess, wrongGuess, everyRound } from './helpers.js';
@@ -22,20 +22,6 @@ test('every mode is the same shape, so the shell never has to ask which it is', 
     for (const setting of mode.settings ?? []) {
       assert.ok(setting.options.length >= 2, `${id}'s ${setting.id} has to be a choice`);
     }
-  }
-});
-
-test('a tier gives you enough guesses to deduce and not enough to enumerate', () => {
-  for (const [id, tier] of ROUNDS) {
-    // A mode you dial rather than answer has no list to get through; what
-    // stops it being brute force is that the target is a curve, not a cell.
-    if (MODES[id].surface) continue;
-
-    const spec = MODES[id].tiers[tier];
-    const combinations = combinationsFor(id, tier);
-    assert.ok(spec.guesses >= 2, `${id}/${tier} needs at least two guesses`);
-    assert.ok(spec.guesses < combinations,
-      `${id}/${tier} allows ${spec.guesses} guesses at ${combinations} answers - that is enumeration`);
   }
 });
 
@@ -274,14 +260,6 @@ test('evening out a loop hands you an uneven loop and no answer to copy', () => 
   }
 });
 
-test('chords: the reading is made from the shape, so the root cannot leak into it', () => {
-  const low = MODES.chords.score({ quality: 'major' }, { root: 0, quality: 'minor' }, 'easy');
-  const high = MODES.chords.score({ quality: 'major' }, { root: 7, quality: 'minor' }, 'easy');
-  assert.deepEqual(low, high);
-  assert.equal(low.cells[0].state, NEAR, 'major and minor share the fifth');
-  assert.equal(low.cells[1].text, '1/2');
-});
-
 test('compression: too gentle and too hard are told apart', () => {
   const answer = { threshold: -20, ratio: 8, attack: 10, release: 120 };
   const soft = MODES.compression.score({ ...answer, ratio: 1.5 }, answer, 'medium');
@@ -302,17 +280,6 @@ test('panning: the reading says how far off and on which side', () => {
   const there = MODES.panning.score({ pan: 0 }, { pan: 0 }, 'hard', puzzle);
   assert.equal(there.cells[0].state, HIT);
   assert.equal(there.cells[0].text, 'Centre');
-});
-
-test('rhythm: getting the feel and missing the figure still says so', () => {
-  const sameFeel = MODES.rhythm.score({ pattern: 'clave23' }, { pattern: 'clave32' }, 'hard');
-  assert.equal(sameFeel.cells[0].state, NEAR);
-  assert.equal(sameFeel.cells[1].state, HIT, 'the feel was right');
-});
-
-test('pitch and intervals: how far off is the short way round', () => {
-  assert.equal(MODES.pitch.score({ note: '11' }, { note: '0' }, 'medium').cells[1].text, '1 semitone');
-  assert.equal(MODES.intervals.score({ interval: '6' }, { interval: '7' }, 'hard').cells[0].state, NEAR);
 });
 
 test('a mode plays every one of its clues, without touching the DOM', () => {
@@ -337,7 +304,6 @@ test('a mode plays every one of its clues, without touching the DOM', () => {
     tone: (...args) => calls.push(['tone', ...args]),
     playNotes: (...args) => calls.push(['notes', ...args]),
     playBed: (...args) => calls.push(['bed', ...args]),
-    playPattern: (...args) => calls.push(['pattern', ...args]),
   };
 
   for (const [id, tier, settings] of ROUNDS) {

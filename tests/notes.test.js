@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 import { NOTES, notesFor } from '../src/notes/index.js';
 import { MODES } from '../src/modes/index.js';
+import { MODULES } from '../scripts/modules.mjs';
 
 // Prose that nobody can reach is prose nobody wrote.
 //
@@ -89,12 +90,9 @@ test('each tool’s DSP points at the notes that explain it', () => {
 });
 
 test('every notes file is in the bundle', () => {
-  // The bundler's module list is hand-ordered, and a file left out of it is
-  // not a build error - it is a page where that tool silently has no notes.
-  const bundler = readFileSync(new URL('../scripts/build-artifact.mjs', import.meta.url), 'utf8');
-  const files = readdirSync(new URL('../src/notes', import.meta.url));
-
-  for (const file of files) {
-    assert.ok(bundler.includes(`notes/${file}`), `notes/${file} is not in MODULES`);
+  // The module list is hand-ordered, and a file left out of it is not a build
+  // error - it is a page where that tool silently has no notes.
+  for (const file of readdirSync(new URL('../src/notes', import.meta.url))) {
+    assert.ok(MODULES.includes(`notes/${file}`), `notes/${file} is not in MODULES`);
   }
 });

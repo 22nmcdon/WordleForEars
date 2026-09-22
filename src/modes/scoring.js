@@ -8,17 +8,18 @@ export const HIT = 'hit'; // sage - that is it
 export const NEAR = 'near'; // gold - close, or partly right
 export const MISS = 'miss'; // rust - nothing in common
 
-/** Hit on the answer, near next door to it, miss beyond that. */
+/**
+ * Hit on the answer, near next door to it, miss beyond that.
+ *
+ * The reading a question answered by picking off an ordered list wants: the
+ * band below the one that is boosted is a near miss, three bands away is not.
+ * Its callers went with the modes that asked you to name a chord; the drills
+ * that ask you to name a band want exactly this and nothing else.
+ */
 export function onScale(guessIndex, answerIndex, { near = 1 } = {}) {
   const steps = Math.abs(guessIndex - answerIndex);
   if (steps === 0) return HIT;
   return steps <= near ? NEAR : MISS;
-}
-
-/** Hit on the answer, near when it leans the same way, miss when it does not. */
-export function bySign(guess, answer) {
-  if (guess === answer) return HIT;
-  return Math.sign(guess) === Math.sign(answer) ? NEAR : MISS;
 }
 
 /** How far off, said in the units of the thing being guessed. */
@@ -33,11 +34,6 @@ export function distanceCell(steps, unit) {
 
 /** Pick one of a list, deterministically. */
 export const pick = (rng, list) => list[Math.floor(rng() * list.length)];
-
-/** Every combination of the slots' options - what "enough to deduce" is measured against. */
-export function combinations(slots) {
-  return slots.reduce((total, slot) => total * slot.options.length, 1);
-}
 
 /* --- controls you dial, rather than options you pick --------------------- */
 

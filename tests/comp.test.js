@@ -6,7 +6,7 @@ import {
 } from '../src/comp/dsp.js';
 import { workletSource } from '../src/comp/node.js';
 import compression from '../src/modes/compression.js';
-import { engraveNote, engraveSymbol } from '../src/engrave.js';
+import { engraveNote } from '../src/engrave.js';
 
 const RATE = 48000;
 
@@ -266,10 +266,12 @@ test('a b in a word is a letter, and a b on a note is a flat', () => {
     assert.equal(engraved(prose), prose, `"${prose}" came out engraved`);
   }
 
-  // And the thing accidentals are actually for still works.
+  // And the thing accidentals are actually for still works. These used to go
+  // through a chord engraver that no longer exists; the logic they cover is
+  // the same one, and it is the half worth keeping.
   assert.equal(engraved('Bb'), 'B♭');
-  assert.equal(engraveSymbol(new Node(), 'm7b5').textContent, 'm7♭5');
-  assert.equal(engraveSymbol(new Node(), '7#9').textContent, '7♯9');
+  assert.equal(engraved('m7b5'), 'm7♭5');
+  assert.equal(engraved('7#9'), '7♯9');
 });
 
 test('nothing a compressor reading says gets read as a chord symbol', () => {
