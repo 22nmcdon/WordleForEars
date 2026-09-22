@@ -6,6 +6,8 @@ import {
 
 // A room, as an impulse response.
 //
+// What a reverb is, for somebody using one, is in src/notes/verb.js.
+//
 // The reverb here is convolution: the settings make an impulse response and
 // the loop is convolved with it. That is more work than an algorithmic reverb
 // and it buys the thing this whole app is built on - the picture on screen is

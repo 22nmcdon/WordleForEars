@@ -3,6 +3,9 @@ import { bandOf } from '../fx/response.js';
 
 // The stereo field, as arithmetic.
 //
+// What stereo width is, for somebody using an imager, is in
+// src/notes/image.js.
+//
 // Everything an imager does comes down to one identity: a pair of channels is
 // the same information as a middle and a side, M = (L+R)/2 and S = (L-R)/2,
 // and you can go back the other way whenever you like. Turning S up is what

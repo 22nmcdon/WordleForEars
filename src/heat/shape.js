@@ -4,6 +4,9 @@ import { fft } from '../fx/fft.js';
 // Saturation: what a signal comes out as when the thing it went through was
 // not quite a straight line.
 //
+// The version of this addressed to somebody using a saturator rather than
+// changing one is in src/notes/heat.js.
+//
 // Every other tool in this app moves energy that was already there. An EQ
 // turns a band up, a compressor turns a moment down, a reverb and a delay put
 // copies of it somewhere else, an imager moves it across the room. A

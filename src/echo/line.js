@@ -4,6 +4,8 @@ import { LOOP_BEAT } from '../audio.js';
 
 // A delay, as an impulse response.
 //
+// What a delay is, for somebody using one, is in src/notes/echo.js.
+//
 // The same trick the reverb plays, and for the same reason: a delay is linear,
 // so everything it will ever do to anything is in what it does to one click.
 // Writing it down that way means the repeats you see are the repeats you

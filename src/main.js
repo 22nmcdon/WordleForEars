@@ -9,6 +9,7 @@ import { shareText, copyToClipboard } from './share.js';
 import { puzzleNumber } from './random.js';
 import { engraveSymbol, engraveNote } from './engrave.js';
 import { renderPicker, syncPicker, pickerState, dialValue } from './bench/picker.js';
+import { notesFor } from './notes/index.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -182,6 +183,31 @@ function buildClue() {
   $('#advice').hidden = !advice;
   $('#advice').textContent = advice ?? '';
   $('#lede').textContent = mode().lede;
+  buildNotes();
+}
+
+/**
+ * What the tool is for, as opposed to how to work it.
+ *
+ * Closed until asked for. The help dialog says which button does what; this
+ * says what a pre-delay is, why even harmonics sound like an octave, and what
+ * summing to mono actually costs - the half of this project that was written
+ * down years' worth of commits ago and addressed only to whoever was next to
+ * change the code.
+ */
+function buildNotes() {
+  const notes = notesFor(ui.mode);
+  const panel = $('#notes');
+
+  panel.hidden = !notes;
+  if (!notes) return;
+
+  panel.open = false;
+  $('#notesOpen').textContent = `Notes on ${notes.title.toLowerCase()}`;
+  $('#notesBody').innerHTML = notes.sections
+    .map((section) => `<section><h3>${section.heading}</h3>${section.body
+      .split('\n\n').map((line) => `<p>${line}</p>`).join('')}</section>`)
+    .join('');
 }
 
 function playClue(id) {

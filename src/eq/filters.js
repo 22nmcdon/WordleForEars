@@ -1,5 +1,8 @@
 // The maths behind the curve.
 //
+// What an equaliser is, for somebody using one rather than changing one, is
+// in src/notes/eq.js - including the long version of the slope note below.
+//
 // Every band is a biquad, from the Audio EQ Cookbook - the same filters Web
 // Audio builds, with the same coefficients, so the curve drawn on screen is
 // the curve the audio actually has rather than a picture of roughly what it is

@@ -355,6 +355,60 @@ body, .sheet, .dock, .top-bar, dialog { transition: background-color 280ms ease,
 .play-btn:disabled { opacity: 0.35; cursor: default; }
 .plays { font-size: 12px; color: var(--text-soft); margin-left: auto; white-space: nowrap; }
 
+/* --- the written half ------------------------------------------------------ */
+/* What the tool is for, rather than how to work it. Closed by default and set
+   quietly: somebody who already knows what a pre-delay is should be able to
+   ignore it without it ever being in the way, and somebody who does not should
+   be one click from four paragraphs about it. */
+.notes {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin: 0 0 20px;
+}
+.notes-open {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 500;
+  color: var(--blush-deep);
+}
+.notes-open::-webkit-details-marker { display: none; }
+/* The disclosure's own arrow, which rotates rather than being swapped, so the
+   thing that moves is the thing that changed. */
+.notes-open::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 160ms ease;
+}
+.notes[open] .notes-open::after { transform: translateY(0) rotate(-135deg); }
+.notes-open:hover { color: var(--charcoal); }
+
+.notes-body { padding-top: 14px; max-width: 64ch; }
+.notes-body section + section { margin-top: 16px; }
+.notes-body h3 {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--charcoal);
+  margin: 0 0 4px;
+}
+.notes-body p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-soft);
+  margin: 0;
+}
+.notes-body p + p { margin-top: 8px; }
+
 /* --- the board ----------------------------------------------------------- */
 /* A mode decides how many readings a row carries - a chord has two, an EQ move
    has three - so the columns are set per row from the cells themselves. Capped,

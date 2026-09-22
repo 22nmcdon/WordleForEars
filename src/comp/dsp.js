@@ -1,5 +1,8 @@
 // The compressor itself, as arithmetic.
 //
+// What a compressor is doing, for somebody using one, is in
+// src/notes/comp.js.
+//
 // Web Audio has a compressor node and this does not use it. That node cannot
 // be fed a sidechain, has no RMS detector and no lookahead, its release curve
 // is not the one written on it, and it applies a makeup gain of its own that
