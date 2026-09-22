@@ -121,7 +121,7 @@ const fonts = /<link id="webfonts"[\s\S]*?>/.exec(page)[0];
 // The name alone. In a gallery the title is how the page is picked out, and
 // the half after the dash is an explainer - which belongs in the description
 // the gallery card already prints underneath.
-const title = 'Harmonle';
+const title = 'Headroom';
 
 const modules = [];
 for (const path of MODULES) {
@@ -164,9 +164,9 @@ ${script}
 // empty. Cheaper to find here than in a published artifact.
 const emitted = bundle.slice(bundle.indexOf('<script type="module">') + '<script type="module">'.length,
                              bundle.lastIndexOf('</script>'));
-const checkFile = join(tmpdir(), 'harmonle-bundle-check.mjs');
+const checkFile = join(tmpdir(), 'headroom-bundle-check.mjs');
 await writeFile(checkFile, emitted);
 await promisify(execFile)(process.execPath, ['--check', checkFile]);
 
-await writeFile(join(root, 'dist', 'harmonle.html'), bundle);
-console.log(`dist/harmonle.html — ${(bundle.length / 1024).toFixed(1)} KB, parses clean`);
+await writeFile(join(root, 'dist', 'headroom.html'), bundle);
+console.log(`dist/headroom.html — ${(bundle.length / 1024).toFixed(1)} KB, parses clean`);

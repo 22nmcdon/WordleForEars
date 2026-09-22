@@ -16,7 +16,7 @@ import { workletModule, installWorklet } from '../fx/worklet.js';
 
 const IMAGER_PARTS = [makeBiquad, setBiquad, runBiquad, imagerCore];
 
-const IMAGER_PROCESSOR = `class HarmonleImager extends AudioWorkletProcessor {
+const IMAGER_PROCESSOR = `class HeadroomImager extends AudioWorkletProcessor {
   constructor() {
     super();
     this.core = imagerCore(sampleRate);
@@ -43,7 +43,7 @@ const IMAGER_PROCESSOR = `class HarmonleImager extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('harmonle-imager', HarmonleImager);`;
+registerProcessor('headroom-imager', HeadroomImager);`;
 
 export function imagerSource() {
   return workletModule({ parts: IMAGER_PARTS, processor: IMAGER_PROCESSOR });
@@ -66,7 +66,7 @@ export class LiveImager {
     const worklet = await installWorklet(this.ctx, imagerSource());
 
     if (worklet) {
-      this.node = new AudioWorkletNode(this.ctx, 'harmonle-imager', {
+      this.node = new AudioWorkletNode(this.ctx, 'headroom-imager', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],

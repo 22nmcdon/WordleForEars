@@ -21,9 +21,9 @@ const run = promisify(execFile);
  */
 test('the bundle builds, parses, and carries the whole app', async () => {
   await run(process.execPath, [join(root, 'scripts', 'build-artifact.mjs')]);
-  const page = await readFile(join(root, 'dist', 'harmonle.html'), 'utf8');
+  const page = await readFile(join(root, 'dist', 'headroom.html'), 'utf8');
 
-  assert.match(page, /<title>Harmonle<\/title>/, 'the artifact keeps its name');
+  assert.match(page, /<title>Headroom<\/title>/, 'the artifact keeps its name');
   assert.ok(!/<!doctype|<html|<body/i.test(page), 'an artifact brings its own skeleton');
   assert.ok(!/^import\s|^export\s/m.test(page), 'module keywords cannot survive into one scope');
 
@@ -53,7 +53,7 @@ test('no two modules declare the same top-level name', async () => {
 });
 
 test('the bundle says what encoding it is in', async () => {
-  const page = await readFile(join(root, 'dist', 'harmonle.html'), 'utf8');
+  const page = await readFile(join(root, 'dist', 'headroom.html'), 'utf8');
 
   // It has to be inside the first kilobyte or the parser has already guessed,
   // and the page is full of em dashes and middle dots to guess wrong about.

@@ -37,7 +37,7 @@ const CONSTANTS = { MOST_LOOKAHEAD, PEAK_DECAY };
 const REPORT = 512;
 
 /** The compressor's own process(): what its inputs mean, and what it reports. */
-const COMPRESSOR_PROCESSOR = `class HarmonleCompressor extends AudioWorkletProcessor {
+const COMPRESSOR_PROCESSOR = `class HeadroomCompressor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.core = compressorCore(sampleRate);
@@ -69,7 +69,7 @@ const COMPRESSOR_PROCESSOR = `class HarmonleCompressor extends AudioWorkletProce
   }
 }
 
-registerProcessor('harmonle-compressor', HarmonleCompressor);`;
+registerProcessor('headroom-compressor', HeadroomCompressor);`;
 
 /** The worklet, as source. */
 export function workletSource() {
@@ -102,7 +102,7 @@ export class LiveCompressor {
     const worklet = await installWorklet(this.ctx, workletSource());
 
     if (worklet) {
-      this.node = new AudioWorkletNode(this.ctx, 'harmonle-compressor', {
+      this.node = new AudioWorkletNode(this.ctx, 'headroom-compressor', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [1],

@@ -1,11 +1,13 @@
 /* ---------------------------------------------------------------------------
-   Harmonle - the ear-training Wordle, dressed as a lead sheet.
+   Headroom - an audio production workbench, dressed as a lead sheet.
 
-   Palette, type and shape follow BRANDING.md: cream paper, charcoal ink, blush
-   and gold accents, Playfair / Cormorant / Jost, and the five pigments that
-   each mean exactly one thing. Chord symbols are hand-lettered, the way a Real
-   Book page is; everything else is quiet so the colours that carry meaning are
-   the loudest things on the page.
+   The design system is this file. There is no BRANDING.md - two comments used
+   to say there was, and there never has been one in this repository, so the
+   rules live here where the rules are enforced: cream paper, charcoal ink,
+   blush and gold accents, Playfair / Cormorant / Jost, and the five pigments
+   that each mean exactly one thing. Everything that is not carrying meaning is
+   quiet, so the colours that are carrying it are the loudest things on the
+   page.
 --------------------------------------------------------------------------- */
 :root {
   --cream:      #faf6f0;

@@ -114,7 +114,7 @@ test('a bucket makes room for the longest tier in the suite', () => {
 });
 
 test('corrupt storage degrades to empty stats instead of throwing', () => {
-  localStorage.setItem('harmonle.stats.v1', '{not json');
+  localStorage.setItem('headroom.stats.v1', '{not json');
   const stats = getStats('practice', 'eq', 'easy');
   assert.equal(stats.played, 0);
   assert.deepEqual(stats.distribution, new Array(MAX_GUESSES).fill(0));

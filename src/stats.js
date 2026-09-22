@@ -2,7 +2,7 @@
 import { MAX_GUESSES } from './game.js';
 import { modeOf } from './modes/index.js';
 
-const KEY = 'harmonle.stats.v1';
+const KEY = 'headroom.stats.v1';
 
 function emptyBucket() {
   return {

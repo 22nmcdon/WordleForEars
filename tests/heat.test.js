@@ -183,7 +183,7 @@ test('auto gain leaves a driven signal as loud as it was', () => {
 
 test('the audio thread runs the same arithmetic as the marking', () => {
   const source = saturatorSource();
-  const build = new Function(`${source.replace(/class HarmonleSaturator[\s\S]*$/, '')}\nreturn shaperCore;`)();
+  const build = new Function(`${source.replace(/class HeadroomSaturator[\s\S]*$/, '')}\nreturn shaperCore;`)();
 
   const theirs = build(rate);
   const mine = shaperCore(rate);

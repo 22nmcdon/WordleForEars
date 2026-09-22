@@ -4,7 +4,7 @@ import { modeOf } from './modes/index.js';
 const SQUARE = { [HIT]: '🟩', [NEAR]: '🟨', miss: '⬜' };
 
 /** Wordle-style result grid: one row per guess, one square per reading. */
-export function shareText(game, { title = 'Harmonle' } = {}) {
+export function shareText(game, { title = 'Headroom' } = {}) {
   const { mode: playing, puzzle, guesses, status, number } = game;
   const spec = modeOf(puzzle.mode);
   const label = playing === 'daily' ? `#${number}` : 'Practice';

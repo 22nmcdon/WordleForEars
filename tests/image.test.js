@@ -138,7 +138,7 @@ test('the worklet is built from the imager, not a copy of it', () => {
     assert.ok(source.includes(name), `the audio thread needs ${name}`);
   }
 
-  const theirs = new Function(`${source.replace(/class HarmonleImager[\s\S]*$/, '')}; return imagerCore;`)();
+  const theirs = new Function(`${source.replace(/class HeadroomImager[\s\S]*$/, '')}; return imagerCore;`)();
   const a = theirs(rate);
   const b = imagerCore(rate);
   const settings = { low: 0.3, mid: 1.6, high: 2.2, lowMid: 180, midHigh: 5200, pan: -0.3 };

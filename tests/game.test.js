@@ -165,7 +165,7 @@ test('the share grid names the mode, counts the guesses and hides the answer', (
   game = submitGuess(game, answerAsGuess(puzzle));
 
   const lines = shareText(game).split('\n');
-  assert.match(lines[0], /^Harmonle Compression #\d+ · Easy 2\/4$/);
+  assert.match(lines[0], /^Headroom Compression #\d+ · Easy 2\/4$/);
   assert.equal([...lines[2]].length, 2, 'one square per reading');
   assert.equal(lines[3], '🟩🟩');
 

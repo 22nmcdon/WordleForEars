@@ -641,11 +641,11 @@ startGame();
 // window forgets and shows them again, where guessing "seen" would hide the one
 // thing a first visitor needs.
 function seenHelp() {
-  try { return localStorage.getItem('harmonle.seenHelp') === '1'; } catch { return false; }
+  try { return localStorage.getItem('headroom.seenHelp') === '1'; } catch { return false; }
 }
 
 if (!seenHelp()) {
   fillHelp();
   $('#help').showModal();
-  try { localStorage.setItem('harmonle.seenHelp', '1'); } catch { /* private window */ }
+  try { localStorage.setItem('headroom.seenHelp', '1'); } catch { /* private window */ }
 }

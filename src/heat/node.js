@@ -25,7 +25,7 @@ const HEAT_CONSTANTS = {
   MOST_TONE,
 };
 
-const HEAT_PROCESSOR = `class HarmonleSaturator extends AudioWorkletProcessor {
+const HEAT_PROCESSOR = `class HeadroomSaturator extends AudioWorkletProcessor {
   constructor() {
     super();
     // One curve per channel. They share settings and nothing else - a
@@ -59,7 +59,7 @@ const HEAT_PROCESSOR = `class HarmonleSaturator extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('harmonle-saturator', HarmonleSaturator);`;
+registerProcessor('headroom-saturator', HeadroomSaturator);`;
 
 export function saturatorSource() {
   return workletModule({
@@ -86,7 +86,7 @@ export class LiveSaturator {
     const worklet = await installWorklet(this.ctx, saturatorSource());
 
     if (worklet) {
-      this.node = new AudioWorkletNode(this.ctx, 'harmonle-saturator', {
+      this.node = new AudioWorkletNode(this.ctx, 'headroom-saturator', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         outputChannelCount: [2],

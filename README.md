@@ -1,16 +1,25 @@
-# Harmonle — ear-training Wordle (proof of concept)
+# Headroom — an audio production workbench
 
-An audio-production trainer that plays like Wordle. **Ten modes**, three
-tiers each, a daily puzzle per mode and unlimited practice. No accounts; stats
-stay in the browser.
+Six real audio plugins, the measurements behind them, and exercises that mark
+you on the result rather than the settings. No accounts; everything stays in
+the browser.
 
-Two halves, and they ask differently.
+**It gives you the actual controls.** You dial an EQ band or a compressor, hear
+your settings against the target as often as you like, and submit when you
+think you are on it. Each reading tells you how far off and *which way* —
+`2.8 oct high`, `3.5 dB shy`, `1.7× soft` — so the next attempt is an
+adjustment rather than a guess.
 
-**The production modes give you the actual controls.** You dial an EQ band or a
-compressor, hear your settings against the target as often as you like, and
-submit when you think you are on it. Each reading tells you how far off and
-*which way* — `2.8 oct high`, `3.5 dB shy`, `1.7× soft` — so the next attempt is
-an adjustment rather than a guess.
+Every claim this app makes about audio was checked by rendering it offline and
+measuring, which is also how a good number of its own bugs were found. Where a
+number in the code came from a measurement, the comment beside it says what was
+measured.
+
+> **Mid-restructure.** This began as a Wordle with four music-theory modes
+> alongside the plugins. Those are gone — naming a half-diminished seventh is
+> musicianship, not production. What replaces them (identification drills, an
+> analysis pillar, an optional guided path) is being built in stages, and guess
+> ceilings, streaks and the share grid are on their way out.
 
 | Mode | What you work with | Exercises |
 | --- | --- | --- |
@@ -56,15 +65,12 @@ because that division is the whole ear skill — even harmonics are octaves and
 sound like the note getting larger, odd ones are fifths and sound like it
 breaking, and *warm* and *dirty* are those two piles of numbers.
 
-**The listening modes ask you to name what you heard**, which is what they are
-for — a chord quality is a thing you recognise, not a thing you dial.
-
-| Mode | The question | Tiers run from |
-| --- | --- | --- |
-| **Chords** | What kind of chord is that | triads → altered dominants |
-| **Pitch** | Name the note you heard | white notes → all twelve, no reference |
-| **Intervals** | How far apart were they | octave and 5th → the tritone and the m2 |
-| **Rhythm** | What is it playing | subdivisions → clave and polyrhythm |
+**What is not here any more.** Four modes used to sit alongside these: name
+the chord, name the note, name the interval, name the figure. They were cut —
+a producer can have a very good pair of ears and never name a half-diminished
+seventh. What is coming in their place asks the same shape of question about
+the right subject: which band is boosted, how much reduction is that, even
+harmonics or odd.
 
 ## Run it
 
@@ -80,7 +86,7 @@ app uses ES modules, which browsers refuse to load over `file://`.)
 
 ```bash
 npm test            # node --test — the modes, the round, the stats
-npm run artifact    # bundles the whole app into dist/harmonle.html, one file
+npm run artifact    # bundles the whole app into dist/headroom.html, one file
 ```
 
 `npm run artifact` folds the stylesheet and the ES modules into a single page so
@@ -96,22 +102,20 @@ writing it; `tests/bundle.test.js` runs the whole thing on every `npm test`.
 
 ## How a round works
 
-1. Press the clue. Every mode offers something to work against — **Play the
-   target** and **Play yours** in the production modes, **Flat** or
-   **Untreated** to hear the sample with nothing done to it, **Arpeggiate** for
-   a chord, a **reference C** for pitch and intervals.
-2. Dial it in, or name it. Some modes ask one thing, some ask three: an EQ move
-   is a frequency, a gain and a width.
-3. Two to four attempts depending on the tier — enough to converge, never
-   enough to sweep the control. A test enforces exactly that.
+1. Press play. The loop runs continuously while you work, and **Yours** and
+   **Target** are two chains fed by the same source, so flipping between them
+   changes the processing and nothing else.
+2. Dial it in. Every control is one you would reach for in a session, with the
+   same units written on it, and audible before you commit to it.
+3. Submit when you think you are on it.
 
 Every attempt comes back as coloured readings: 🟩 that is it, 🟨 close, 🟥 not
-close. What "close" means is each mode's own business, and the reading spells it
-out — `2.8 oct high`, `3.5 dB shy`, `1.7× soft`, `2/3` notes shared,
-`1 semitone`, `syncopated`.
+close. What "close" means is each tool's own business, and the reading spells
+it out — `450 Hz too hot`, `1.4 dB out`, `too wide at 120`, `2 dB too dirty`,
+`7.2 dB too much warmth`, `right depth, wrong timing`.
 
-Nothing here tells you that you are wrong. "3 dB hot", "outside the chord" —
-the reading names where the thing sits, which is both the useful answer and the
+Nothing here tells you that you are wrong. "3 dB hot", "too far left" — the
+reading names where the thing sits, which is both the useful answer and the
 house style.
 
 ### The fix exercises
@@ -128,28 +132,31 @@ that doing it right is audible rather than merely scored:
   **0.1 dB** with the reference settings, **6.0 dB** if the ratio is too gentle,
   **9.5 dB** if the threshold is too high.
 
-## What's in this POC
+## What's here
 
-- **All ten modes above**, each with three tiers, a daily seeded from the UTC
-  date (the same puzzle for everybody) and unlimited practice. An exercise gets
-  its own daily, because matching a target and curing a fault are different
-  exercises rather than two views of one.
+- **All six tools above**, each with three tiers and two or three exercises,
+  and every one usable on **your own audio** — there is an *Open a file* button
+  on every plugin.
+- **Notes on each tool**: four sections apiece on what it is *for*, rather than
+  which button does what. What mid/side actually is, why pre-delay is the
+  control people miss, why even harmonics sound like an octave and odd ones
+  like something breaking.
 - **Every sound synthesised live** — no samples to host. A piano built from
   additive partials, a kit built from filtered noise, and a four-piece bed
-  (kick, bass, chord, hats) for the modes that need something broadband to judge
-  a move against.
-- **A setting per mode** that changes *what* you are listening to rather than
-  how hard it is: the chord's voicing, the EQ source, melodic against harmonic
-  intervals, the tempo, a reference tone or none.
-- **Shareable grids**, per-mode stats (streaks, distribution, and which kind of
-  answer keeps catching you out), and a finished daily that comes back read-only
-  instead of being offered twice.
+  (kick, bass, chord, hats) for the exercises that need something broadband to
+  judge a move against.
+- **Per-tool progress**, including which kind of answer keeps catching you out.
 
 ## Not built yet
 
-- **Guitar and synth-pad timbres** for chords — the plan's third variable. One
-  piano for now.
-- Any server, account or cross-device sync. Stats live in `localStorage`.
+- **Identification drills** — name the boosted band, judge the gain reduction,
+  tell even harmonics from odd. The DSP for every one of them already exists;
+  the exercises do not.
+- **The analysis pillar** — loading your own audio and having it read back to
+  you: loudness, crest factor, spectral balance, stereo correlation per band.
+- **An optional guided path** through the material.
+- Any server, account or cross-device sync. Everything lives in
+  `localStorage`.
 
 ## Adding a mode
 
@@ -179,22 +186,22 @@ that each of its clues actually makes a sound.
 
 ## The look
 
-It follows `BRANDING.md`: a Real Book page that answers back. Cream paper,
-charcoal ink, blush and gold accents, Playfair / Cormorant / Jost — and chord
-symbols hand-lettered in Kalam, because they are the one thing on the page a
-player would have written.
+A Real Book page that answers back. The design system is `styles.css`, which is
+commented as one — two comments used to cite a `BRANDING.md`, and there has
+never been one in this repository. Cream paper, charcoal ink, blush and gold
+accents, Playfair / Cormorant / Jost.
 
-- **The five meaning colours do not move between modes.** Sage is "that is it",
+- **The five meaning colours do not move between tools.** Sage is "that is it",
   gold is "close", rust is "not close" — the same three readings whether the
-  thing being read is a chord, a frequency or a clave.
+  thing being read is a curve, a decay or a harmonic series.
 - **Practice is the same page in a different light.** `body.practice` redefines
   the palette tokens and nothing else: paper drops a stop and goes cooler, the
   rose accent becomes slate. No component knows the page changed colour.
 - **Three radii, each meaning something.** `1px` is paper (inputs, filled
   buttons), a pill is a state you are in, `50%` is a dot (the help `?`).
-- **The hand face is for chord symbols only** — so is the raised-extension
-  treatment that goes with it. A frequency or an interval is set in the serif,
-  on the line, with tabular figures.
+- **Readings are set in the serif, on the line, with tabular figures**, so a
+  column of decibels lines up. There used to be a hand-lettered face for chord
+  symbols; it went with the chords.
 - **Webfonts never block rendering.** The `<link>` carries `data-href` and is
   promoted by script only when the page is served; every family has a real
   fallback, so the page reads the same offline in the fallback faces.
@@ -207,17 +214,22 @@ blocked.
 ```
 index.html          shell and markup
 styles.css          the design system, as tokens and components
-src/audio.js        the whole suite's sound: piano, kit, bed, patterns, loops
-src/eq/             the channel EQ: filter maths, the A/B player, the plugin
-src/theory.js       pitch classes, chord qualities, voicings
-src/random.js       seeded PRNG + daily/puzzle numbering
-src/modes/          one file per mode, plus the shared scoring vocabulary
-src/game.js         the round, over whichever mode is asking (pure, no DOM)
-src/stats.js        localStorage persistence, per mode and tier
-src/share.js        emoji result grid
-src/engrave.js      chord symbols written the way a chart writes them
+src/audio.js        the whole suite's sound: piano, kit, bed, loops
+src/eq/  comp/      one directory per tool: the DSP, the A/B player, the plugin
+src/image/ verb/
+src/echo/ heat/
+src/fx/             what more than one tool needs: FFT, impulse response
+                    reading, the shared panel furniture, worklet stringifying
+src/notes/          what each tool is for, in prose, for the person using it
+src/bench/          the workbench shell - the picker, and more to come
+src/modes/          one file per exercise set, plus the shared scoring vocabulary
+src/random.js       seeded PRNG + daily numbering
+src/game.js         the round, over whichever tool is asking (pure, no DOM)
+src/stats.js        localStorage persistence, per tool and tier
+src/share.js        emoji result grid (on its way out)
+src/engrave.js      accidentals, set properly
 src/main.js         DOM wiring
-scripts/            the single-file bundler
+scripts/            the single-file bundler, and the module order it uses
 tests/              node:test coverage of all of the above
 ```
 
@@ -235,27 +247,21 @@ corner frequency rather than taken out of circuit, so an "off" low-pass was
 still taking three quarters of a decibel off 12 kHz that the curve did not show.
 
 The rest of the audio is checked the same way — by rendering it, not by
-listening hopefully: every mode's clue goes through an `OfflineAudioContext`
-and gets measured. That is how the
-fix exercises above were confirmed to work, how panning was confirmed to be a
-real stereo image rather than a level difference, and how several genuine bugs
-were found — the rhythm clue peaking at 0.06 where the rest of the suite peaks
-near 0.35; compression clipping at 1.8 because Web Audio's compressor applies a
-makeup gain of its own; and the compressor sitting ahead of the master gain, so
-the threshold that was right for the drums was 3 dB wrong for the full mix.
+listening hopefully. That is how the fix exercises above were confirmed to
+work, how the stereo mode was confirmed to be a real image rather than a level
+difference, and how a long list of genuine bugs were found: an attack knob that
+measured 32 ms when set to 20, because the detector was fed a rectified level
+that falls to zero twice a cycle; a reverb whose early/late control measured
+0.00 dB, because taps set by amplitude are one sample against a tail of a
+hundred thousand; a mono-compatibility reading that charged a hard-panned
+sound three decibels it does not lose; and a saturator that put inharmonic
+junk 10 dB under a hi-hat until it was made to run eight times faster than the
+signal.
 
-Three tables in the code are measurements rather than arithmetic, and say so
-where they sit:
-
-- **`MAKEUP`** in `compression.js` — what the compressor node does to the
-  loudness at each setting, so it can be taken back off. Every setting now
-  lands within about a decibel of the untouched loop, which is what stops the
-  exercise being answerable as "the loud one".
-- **`INTO_THE_CHAIN`** — the level each source arrives at, so a threshold means
-  the same thing whichever you pick.
-- **`THRESHOLD_UNDER` / `RATIO_FOR`** — what it actually takes to level the
-  loop. On paper a threshold at the quiet hits and a ratio of spread-over-three
-  should do it; rendered, it leaves half the unevenness, because the detector
-  works on peaks while most of a drum hit's energy sits below its peak. The
-  reference answer is the one that measures flat, since it is what the player's
-  own dialling is scored against.
+Where a number in this codebase came from a measurement rather than from
+arithmetic, the comment above it says what was measured. The compressor's
+tolerances record what a two-decibel threshold error reads as against the drum
+bed; the reverb's record what a decay fifteen per cent too long reads as; the
+saturator's record how much drive it takes before a given curve is audible at
+all. Those paragraphs are for whoever changes the number, and they stay in the
+code beside it.

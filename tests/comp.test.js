@@ -194,7 +194,7 @@ test('the worklet is built from the compressor, not a copy of it', () => {
   }
 
   // Run the string the audio thread is given, and hold it against the module.
-  const theirs = new Function(`${source.replace(/class HarmonleCompressor[\s\S]*$/, '')}; return compressorCore;`)();
+  const theirs = new Function(`${source.replace(/class HeadroomCompressor[\s\S]*$/, '')}; return compressorCore;`)();
   const a = theirs(RATE);
   const b = compressorCore(RATE);
   const settings = { threshold: -22, ratio: 6, attack: 7, release: 90, knee: 4, scHigh: 120, detector: 'rms' };
