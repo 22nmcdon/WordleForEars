@@ -8,6 +8,7 @@ import { getStats, recordGame, dailyResult, weakestKind, resetStats } from './st
 import { shareText, copyToClipboard } from './share.js';
 import { puzzleNumber } from './random.js';
 import { engraveSymbol, engraveNote } from './engrave.js';
+import { renderPicker, syncPicker, pickerState, dialValue } from './bench/picker.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -81,86 +82,8 @@ function fillSettings() {
 
 /* ---------- the picker ---------- */
 
-/** One chip: what a player would write, over what it is called. */
-function chip(slotId, option) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'option';
-  button.dataset.slot = slotId;
-  button.dataset.option = option.id;
-  button.setAttribute('aria-pressed', 'false');
-  button.setAttribute('aria-label', option.name ? `${option.symbol}, ${option.name}` : option.symbol);
-
-  const symbol = document.createElement('span');
-  // Chord symbols are the one thing set in the hand face, and the one thing
-  // whose figures ride above the line. Everything else - a frequency, an
-  // interval, a clave - is set in the serif, on the line, with its accidentals
-  // still borrowed from the serif.
-  symbol.className = mode().handLettered ? 'symbol hand' : 'symbol';
-  writeSymbol(symbol, option.symbol);
-  button.appendChild(symbol);
-
-  if (option.name) {
-    const name = document.createElement('span');
-    name.className = 'name';
-    name.textContent = option.name;
-    button.appendChild(name);
-  }
-  return button;
-}
-
-/**
- * One control: a slider, its value written out beside it, and its own name.
- *
- * This is the half that makes the production modes a tool rather than a quiz -
- * the same thing you would reach for in a session, with the same units on it,
- * and audible before you commit to it.
- */
-function control(slot) {
-  const row = document.createElement('div');
-  row.className = 'control';
-
-  const name = document.createElement('label');
-  name.className = 'control-name';
-  name.textContent = slot.label;
-  name.htmlFor = `dial-${slot.id}`;
-  row.appendChild(name);
-
-  const readout = document.createElement('output');
-  readout.className = 'control-value';
-  readout.id = `read-${slot.id}`;
-  row.appendChild(readout);
-
-  const dial = document.createElement('input');
-  dial.type = 'range';
-  dial.id = `dial-${slot.id}`;
-  dial.className = 'dial';
-  dial.dataset.dial = slot.id;
-  // A log control is dialled in log space, so an octave is the same distance
-  // wherever you are on it - which is how the ear hears frequency and ratio.
-  dial.min = slot.log ? Math.log2(slot.min) : slot.min;
-  dial.max = slot.log ? Math.log2(slot.max) : slot.max;
-  dial.step = slot.log ? 0.02 : slot.step;
-  dial.value = slot.log ? Math.log2(ui.guess[slot.id]) : ui.guess[slot.id];
-  dial.setAttribute('aria-label', slot.label);
-  row.appendChild(dial);
-
-  const ends = document.createElement('div');
-  ends.className = 'control-ends';
-  ends.innerHTML = `<span>${slot.format(slot.min)}</span><span>${slot.format(slot.max)}</span>`;
-  row.appendChild(ends);
-
-  return row;
-}
-
-const dialValue = (slot, raw) => {
-  const value = slot.log ? 2 ** Number(raw) : Number(raw);
-  return slot.log ? value : Math.round(value / slot.step) * slot.step;
-};
-
 function buildPicker() {
   const picker = $('#picker');
-  picker.textContent = '';
 
   // Chips are cleared between guesses; controls are not. A producer works from
   // where they got to last time, not from the middle of the range again.
@@ -168,70 +91,42 @@ function buildPicker() {
   ui.guess = { ...dialled, ...Object.fromEntries(
     Object.entries(ui.guess).filter(([id]) => id in dialled)) };
 
-  for (const slot of mode().slots(ui.tier)) {
-    const group = document.createElement('div');
-    group.className = 'picker-group';
+  renderPicker(picker, mode().slots(ui.tier), ui.guess, {
+    write: writeSymbol,
+    hand: mode().handLettered,
+  });
 
-    if (slot.kind === 'range') {
-      group.appendChild(control(slot));
-      picker.appendChild(group);
-      continue;
-    }
-
-    const label = document.createElement('p');
-    label.className = 'eyebrow';
-    label.textContent = slot.label;
-    group.appendChild(label);
-
-    const options = document.createElement('div');
-    options.className = 'options';
-    options.setAttribute('role', 'group');
-    options.setAttribute('aria-label', slot.label);
-    for (const option of slot.options) options.appendChild(chip(slot.id, option));
-
-    group.appendChild(options);
-    picker.appendChild(group);
-  }
-
-  syncPicker();
+  syncAnswer();
 }
 
-function syncPicker() {
+/**
+ * Repaint the controls, and the button under them.
+ *
+ * The picker draws itself; what is left here is the part that is about the
+ * round rather than about the controls - whether there is anything left to
+ * submit, and what the button should say.
+ */
+function syncAnswer() {
+  const submit = $('#submit');
+
   if (mode().surface) {
-    const ready = ui.game.status === 'playing';
-    $('#submit').disabled = !ready;
-    $('#submit').textContent = ready ? 'Lock it in' : 'Submitted';
+    const live = ui.game.status === 'playing';
+    submit.disabled = !live;
+    submit.textContent = live ? 'Lock it in' : 'Submitted';
     return;
   }
 
-  for (const button of document.querySelectorAll('[data-option]')) {
-    const picked = ui.guess[button.dataset.slot] === button.dataset.option;
-    button.setAttribute('aria-pressed', picked ? 'true' : 'false');
-  }
-
   const slots = mode().slots(ui.tier);
+  syncPicker($('#picker'), slots, ui.guess);
 
-  for (const slot of slots) {
-    if (slot.kind !== 'range') continue;
-    const readout = document.getElementById(`read-${slot.id}`);
-    if (readout) readout.textContent = slot.format(ui.guess[slot.id]);
-  }
-
-  const complete = slots.every((slot) => ui.guess[slot.id] !== undefined);
+  const { complete, dialling, summary } = pickerState(slots, ui.guess);
   const ready = complete && ui.game.status === 'playing';
-  const dialling = slots.some((slot) => slot.kind === 'range');
 
-  $('#submit').disabled = !ready;
-  $('#submit').textContent = ready
-    ? `${dialling ? 'Lock in' : 'Guess'} ${slots.map((slot) => label(slot, ui.guess[slot.id])).join(' · ')}`
+  submit.disabled = !ready;
+  submit.textContent = ready
+    ? `${dialling ? 'Lock in' : 'Guess'} ${summary}`
     : slots.length > 1 ? 'Pick one of each' : 'Submit guess';
 }
-
-const label = (slot, value) => {
-  if (slot.kind === 'range') return slot.format(value);
-  const option = slot.options.find((o) => o.id === value);
-  return option ? option.symbol : '';
-};
 
 /* ---------- the clue ---------- */
 
@@ -246,7 +141,10 @@ function mountSurface() {
   surface.hidden = !own;
   $('#clue').hidden = !!own;
   $('#picker').hidden = !!own;
-  $('#advice').hidden = $('#advice').hidden || !!own;
+  // Not the advice. It is a line about the tool, and the tools with a surface
+  // are exactly the ones that have any - so this used to hide all of it, every
+  // time, in the same synchronous pass that buildClue had just written it.
+  // Five paragraphs, set and never seen by anybody.
 
   if (!own) {
     surface.textContent = '';
@@ -258,7 +156,7 @@ function mountSurface() {
     puzzle: ui.game.puzzle,
     tier: ui.tier,
     settings: settings(),
-    onChange: () => syncPicker(),
+    onChange: () => syncAnswer(),
   });
 }
 
@@ -465,7 +363,7 @@ function render() {
   $('#again').textContent = ui.playing === 'daily' ? 'Try it in practice' : 'Another one';
   if (!over) $('#played').textContent = '';
 
-  syncPicker();
+  syncAnswer();
 }
 
 /**
@@ -661,7 +559,7 @@ function wire() {
     const chosen = e.target.closest('[data-option]');
     if (!chosen) return;
     ui.guess[chosen.dataset.slot] = chosen.dataset.option;
-    syncPicker();
+    syncAnswer();
   });
 
   $('#picker').addEventListener('input', (e) => {
@@ -670,7 +568,7 @@ function wire() {
 
     const slot = mode().slots(ui.tier).find((s) => s.id === dial.dataset.dial);
     ui.guess[slot.id] = dialValue(slot, dial.value);
-    syncPicker();
+    syncAnswer();
   });
 
   $('#submit').addEventListener('click', onSubmit);

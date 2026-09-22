@@ -20,6 +20,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // game's guess ceiling out of the registry - so this is an order, not a list.
 const MODULES = [
   'theory.js', 'random.js', 'engrave.js',
+  'bench/picker.js',
   'audio.js',
   'fx/fft.js',
   'eq/filters.js', 'eq/spectrum.js', 'eq/player.js', 'eq/plugin.js',
