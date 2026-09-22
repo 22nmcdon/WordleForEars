@@ -45,6 +45,7 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const RESULT_MARKED = {
   compression: ['fix', 'duck'],
   reverb: ['tempo'],
+  panning: ['mono'],
 };
 
 /**
@@ -67,6 +68,15 @@ export function wrongGuess(puzzle, nth = 0) {
       // Far lower and far harder than any answer this mode makes, and a
       // different threshold each time so no two attempts are the same guess.
       return { threshold: -55 + nth, ratio: 18, attack: 1, release: 30, sidechain: false };
+    }
+
+    if (puzzle.mode === 'panning') {
+      // Every band collapsed to mono, which is wrong for a width and wrong
+      // for a low end that needs narrowing without the record going with it.
+      // The placing has to be answered against the target, because there is
+      // no one place in a room that is far from every other place in it.
+      const away = (puzzle.answer?.pan ?? 0) > 0 ? -0.9 : 0.9;
+      return { pan: away + nth * 0.02 * -Math.sign(away), low: 0.05, mid: 0.05, high: 0.05 };
     }
 
     if (puzzle.mode === 'delay') {

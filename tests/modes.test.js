@@ -142,7 +142,10 @@ test('a reading comes back for every slot, and never fewer than two', () => {
     const chosen = settingsFor(id, settings);
     const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `cells-${id}-${tier}` });
     const slots = MODES[id].slots(tier, chosen);
-    const cells = MODES[id].score(answerAsGuess(puzzle), puzzle.answer, tier).cells;
+    // Through the real path, which hands the mode its puzzle: some of them
+    // need it to know which exercise they are being asked about.
+    const perfect = answerAsGuess(puzzle) ?? wrongGuess(puzzle);
+    const cells = scoreGuess(perfect, puzzle).cells;
 
     assert.ok(cells.length >= slots.length, `${id}/${tier} drops a slot from the board`);
     assert.ok(cells.length >= 2, `${id}/${tier} has nothing to make a row out of`);
@@ -166,7 +169,7 @@ test('every mode can say what the answer was, and what kind of answer it is', ()
     const puzzle = makePuzzle({ mode: id, tier, settings: settingsFor(id, settings), seed: `reveal-${id}-${tier}` });
     assert.ok(reveal(puzzle).symbol, `${id}/${tier} reveals nothing`);
 
-    const kind = MODES[id].weak(puzzle.answer);
+    const kind = MODES[id].weak(puzzle.answer, puzzle);
     assert.ok(kind.key !== undefined && kind.label, `${id}/${tier} cannot name a weak spot`);
   }
 });
@@ -290,10 +293,15 @@ test('compression: too gentle and too hard are told apart', () => {
 });
 
 test('panning: the reading says how far off and on which side', () => {
-  const off = MODES.panning.score({ pan: -50 }, { pan: 0 }, 'hard');
+  const puzzle = { settings: { exercise: 'place' }, answer: { pan: 0 } };
+  const off = MODES.panning.score({ pan: -0.5 }, { pan: 0 }, 'hard', puzzle);
   assert.equal(off.cells[0].state, MISS);
   assert.match(off.cells[1].text, /left$/);
-  assert.equal(MODES.panning.score({ pan: 5 }, { pan: 0 }, 'hard').cells[0].state, HIT);
+
+  // And a placing that is where it should be reads as one.
+  const there = MODES.panning.score({ pan: 0 }, { pan: 0 }, 'hard', puzzle);
+  assert.equal(there.cells[0].state, HIT);
+  assert.equal(there.cells[0].text, 'Centre');
 });
 
 test('rhythm: getting the feel and missing the figure still says so', () => {

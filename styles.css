@@ -731,7 +731,7 @@ input.knob-value:focus {
    The displays are dark and everything around them is not. That is how a
    plugin looks, and inverting it for the sake of the page would cost more in
    legibility than it gained in manners. */
-.comp, .verb, .echo { display: flex; flex-direction: column; gap: 12px; }
+.comp, .verb, .echo, .image { display: flex; flex-direction: column; gap: 12px; }
 
 .plugin-head {
   display: flex;
@@ -860,6 +860,26 @@ input.knob-value:focus {
   border-top: 1px solid var(--line);
 }
 
+/* --- the stereo image ------------------------------------------------------ */
+/* The goniometer is square because it is a picture of two things against each
+   other and a stretched one lies about the angle - which is the only thing it
+   is there to show. */
+.image-display {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.75fr) 1.6fr;
+  gap: 8px;
+  height: clamp(190px, 32vh, 290px);
+}
+
+.image-routing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
 /* Names a panel within a plugin - the compressor's detector, the EQ's
    analyser. Shared, because a second rule for the same thing is a second rule
    to keep in step. */
@@ -897,7 +917,8 @@ input.knob-value:focus {
   .comp-panel-meters { grid-area: meters; }
 
   .verb-display,
-  .echo-display {
+  .echo-display,
+  .image-display {
     grid-template-columns: 1fr;
     height: clamp(260px, 48vh, 360px);
   }

@@ -2,16 +2,15 @@ import {
   compressorCore, staticGain, makeBiquad, setBiquad, runBiquad,
   MOST_LOOKAHEAD, PEAK_DECAY,
 } from './dsp.js';
+import { workletModule, installWorklet } from '../fx/worklet.js';
 
 /**
  * The compressor, made audible.
  *
- * The worklet is written out of the DSP's own source. `compressorCore` and the
- * three functions it leans on are stringified and handed to the audio thread
- * verbatim, so the compressor you hear is the same code that scores your guess
- * and the same code the tests measure. Keeping a second copy of a compressor
- * in a template literal would mean two compressors, and the day they drifted
- * apart the game would be marking you against a sound nobody made.
+ * The worklet is written out of the DSP's own source - see `fx/worklet.js`
+ * for why. What is here is the part that is the compressor's own: two
+ * channels in, the signal on the left and the key on the right, one out, and
+ * the deepest reduction since anybody last looked.
  *
  * A ScriptProcessor stands behind it. AudioWorklet needs a module loaded from
  * a URL, and this page is published as a single file that may be served under
@@ -21,7 +20,7 @@ import {
  */
 
 /** The functions the audio thread needs, in the order they are defined. */
-const PARTS = [staticGain, makeBiquad, setBiquad, runBiquad, compressorCore];
+const COMPRESSOR_PARTS = [staticGain, makeBiquad, setBiquad, runBiquad, compressorCore];
 
 /**
  * The module-level values those functions read.
@@ -37,17 +36,8 @@ const CONSTANTS = { MOST_LOOKAHEAD, PEAK_DECAY };
 /** How often the audio thread reports what it is doing, in samples. */
 const REPORT = 512;
 
-/** The worklet, as source - constants included so nothing arrives undefined. */
-export function workletSource() {
-  const prelude = Object.entries(CONSTANTS)
-    .map(([name, value]) => `const ${name} = ${value};`)
-    .join('\n');
-
-  return `${prelude}
-
-${PARTS.map((part) => part.toString()).join('\n\n')}
-
-class HarmonleCompressor extends AudioWorkletProcessor {
+/** The compressor's own process(): what its inputs mean, and what it reports. */
+const COMPRESSOR_PROCESSOR = `class HarmonleCompressor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.core = compressorCore(sampleRate);
@@ -80,29 +70,10 @@ class HarmonleCompressor extends AudioWorkletProcessor {
 }
 
 registerProcessor('harmonle-compressor', HarmonleCompressor);`;
-}
 
-/** Loads the worklet into a context once, and remembers whether it took. */
-const loaded = new WeakMap();
-
-function install(ctx) {
-  if (loaded.has(ctx)) return loaded.get(ctx);
-
-  const attempt = (async () => {
-    if (!ctx.audioWorklet) return false;
-    const url = URL.createObjectURL(new Blob([workletSource()], { type: 'application/javascript' }));
-    try {
-      await ctx.audioWorklet.addModule(url);
-      return true;
-    } catch {
-      return false;
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  })();
-
-  loaded.set(ctx, attempt);
-  return attempt;
+/** The worklet, as source. */
+export function workletSource() {
+  return workletModule({ constants: CONSTANTS, parts: COMPRESSOR_PARTS, processor: COMPRESSOR_PROCESSOR });
 }
 
 /**
@@ -128,7 +99,7 @@ export class LiveCompressor {
   connect(dest) { this.out.connect(dest); return dest; }
 
   async start() {
-    const worklet = await install(this.ctx);
+    const worklet = await installWorklet(this.ctx, workletSource());
 
     if (worklet) {
       this.node = new AudioWorkletNode(this.ctx, 'harmonle-compressor', {

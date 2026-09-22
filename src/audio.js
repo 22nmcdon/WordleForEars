@@ -232,14 +232,40 @@ export class Engine {
 
   /* ---------- clues ---------- */
 
+  /**
+   * Somewhere to send a sound so that it lands in a particular place.
+   *
+   * Equal power, which is what a pan control on a desk is: a gain difference
+   * would be a balance control and would read as a level change rather than
+   * as a placing. Kept in @p places so that a bed with a thousand notes in it
+   * builds five panners rather than a thousand.
+   */
+  at(places, pan, dest) {
+    const key = pan.toFixed(3);
+    if (!places.has(key)) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = Math.max(-1, Math.min(1, pan));
+      panner.connect(dest || this.master);
+      places.set(key, panner);
+    }
+    return places.get(key);
+  }
+
   /** Play notes together, or one after another. */
-  playNotes(notes, { arpeggio = false, duration = 2.4, dest = null, at = null, velocity = 1 } = {}) {
+  playNotes(notes, { arpeggio = false, duration = 2.4, dest = null, at = null, velocity = 1, fan = null } = {}) {
     this.ensure();
     const start = at ?? this.start;
     const step = arpeggio ? 0.34 : 0.012; // a tiny spread keeps a block chord human
+
     notes.forEach((midi, i) => {
+      // Fanned across the field, low notes to the left, which is how a chord
+      // is voiced across a keyboard and how it ends up sitting in a mix.
+      const to = fan
+        ? this.at(fan.places, -fan.width + (2 * fan.width * i) / Math.max(1, notes.length - 1), dest)
+        : dest;
+
       this.note(midi, start + i * step, arpeggio ? duration * 0.7 : duration,
-                { dest, velocity: velocity * (i === 0 ? 1 : 0.85) });
+                { dest: to, velocity: velocity * (i === 0 ? 1 : 0.85) });
     });
     return start;
   }
@@ -253,13 +279,22 @@ export class Engine {
    * there is less going on and nothing masking it. `drums` is transients only,
    * for anything being judged on how it handles them.
    */
-  playBed(kind, { seconds = 4, dest = null, at = null, bpm = 96, uneven = 0 } = {}) {
+  playBed(kind, { seconds = 4, dest = null, at = null, bpm = 96, uneven = 0, spread = false } = {}) {
     this.ensure();
     const start = at ?? this.start;
     const beat = 60 / bpm;
     const bars = Math.ceil(seconds / (beat * 4));
     const chord = [48, 55, 60, 64, 67]; // Cm-ish spread: root, fifth, octave, third
     const bass = [36, 36, 43, 41];
+
+    // Where each part sits, when the bed is being laid out across a field
+    // rather than stacked in the middle. The bass is the interesting one: a
+    // detuned pair hard left and right is a thing people really do to make a
+    // low end sound big, and it is also how a low end stops surviving a fold
+    // to mono - which is the fault the imaging exercise asks you to undo.
+    const places = new Map();
+    const to = (pan) => (spread ? this.at(places, pan, dest) : dest);
+    const FIELD = { kick: 0, snare: 0.22, hat: -0.6, chord: 0.7, bass: 0.8 };
 
     // `uneven` is how many decibels the quiet beats sit below the loud ones -
     // the fault a compressor is asked to even out. Beat by beat rather than bar
@@ -283,25 +318,43 @@ export class Engine {
         }
         if (kind === 'bass') {
           this.note(bass[(bar * 8 + step) % bass.length] - 12, when, beat * 0.62,
-                    { dest, velocity: 0.95 * swing });
+                    { dest: to(0), velocity: 0.95 * swing });
           continue;
         }
 
         if (kind !== 'instrument') {
-          if (step === 0 || step === 5) this.drum('kick', when, { dest, level: swing });
-          if (step === 2 || step === 6) this.drum('snare', when, { dest, level: swing });
-          if (kind !== 'drums') this.drum('hat', when, { dest, level: swing * (step % 2 ? 0.5 : 0.8) });
+          if (step === 0 || step === 5) this.drum('kick', when, { dest: to(FIELD.kick), level: swing });
+          if (step === 2 || step === 6) this.drum('snare', when, { dest: to(FIELD.snare), level: swing });
+          if (kind !== 'drums') {
+            this.drum('hat', when, { dest: to(step % 2 ? FIELD.hat : -FIELD.hat * 0.7), level: swing * (step % 2 ? 0.5 : 0.8) });
+          }
         }
 
         if (kind === 'drums') continue;
 
         // The piano lands on the beat; the bass walks under it.
         if (step % 4 === 0) {
-          this.playNotes(chord, { duration: beat * 1.6, dest, at: when, velocity: swing });
+          this.playNotes(chord, {
+            duration: beat * 1.6, dest, at: when, velocity: swing,
+            fan: spread ? { places, width: FIELD.chord } : null,
+          });
         }
         if (kind === 'mix' && step % 2 === 0) {
-          this.note(bass[(bar * 4 + step / 2) % bass.length], when, beat * 0.9,
-                    { dest, velocity: 0.9 * swing });
+          const note = bass[(bar * 4 + step / 2) % bass.length];
+          if (spread) {
+            // The same note twice, a quarter of a semitone apart, hard left
+            // and hard right. Detuning is what decorrelates it, and
+            // decorrelated is what makes it wide - and what makes it vanish
+            // in mono once somebody widens it further. A quarter of a
+            // semitone reads as thickness rather than as wrongness on a note
+            // this short, and it is what takes the low band's correlation
+            // down to about a half, which is where the fault has something
+            // to work on.
+            this.note(note * 1, when, beat * 0.9, { dest: this.at(places, -FIELD.bass, dest), velocity: 0.64 * swing });
+            this.note(note + 0.25, when, beat * 0.9, { dest: this.at(places, FIELD.bass, dest), velocity: 0.64 * swing });
+          } else {
+            this.note(note, when, beat * 0.9, { dest, velocity: 0.9 * swing });
+          }
         }
       }
     }
@@ -322,12 +375,13 @@ export class Engine {
    * a decaying pattern has a chord still ringing when the splice comes round,
    * and chopping it there is an audible click on every pass.
    */
-  async renderLoop(kind, { bars = LOOP_BARS, bpm = LOOP_BPM, uneven = 0 } = {}) {
+  async renderLoop(kind, { bars = LOOP_BARS, bpm = LOOP_BPM, uneven = 0, spread = false } = {}) {
     this.ensure();
-    // `uneven` is part of what the loop is, not a way of playing it - a bed
-    // whose hits are all over the place is a different recording - so it is
-    // part of the key this is remembered under.
-    const held = `${kind}:${bars}:${bpm}:${uneven}`;
+    // `uneven` and `spread` are part of what the loop is, not ways of playing
+    // it - a bed whose hits are all over the place is a different recording,
+    // and so is one laid out across a field - so both are part of the key
+    // this is remembered under.
+    const held = `${kind}:${bars}:${bpm}:${uneven}:${spread}`;
     if (this.loops.has(held)) return this.loops.get(held);
 
     const rate = this.ctx.sampleRate;
@@ -335,7 +389,8 @@ export class Engine {
     const length = bars * 4 * beat;
     const tail = 1.6;
 
-    const offline = new OfflineAudioContext(1, Math.ceil(rate * (length + tail)), rate);
+    const channels = spread ? 2 : 1;
+    const offline = new OfflineAudioContext(channels, Math.ceil(rate * (length + tail)), rate);
     const scratch = new Engine();
     scratch.ctx = offline;
     scratch.master = offline.createGain();
@@ -343,17 +398,19 @@ export class Engine {
     scratch.master.connect(offline.destination);
 
     if (kind === 'noise') scratch.playNoiseBed(length + tail, bpm);
-    else scratch.playBed(kind, { seconds: length, at: 0, bpm, uneven });
+    else scratch.playBed(kind, { seconds: length, at: 0, bpm, uneven, spread });
 
     const rendered = await offline.startRendering();
-    const source = rendered.getChannelData(0);
     const samples = Math.floor(rate * length);
+    const loop = this.ctx.createBuffer(channels, samples, rate);
 
-    const loop = this.ctx.createBuffer(1, samples, rate);
-    const data = loop.getChannelData(0);
-    for (let i = 0; i < samples; i += 1) data[i] = source[i];
-    // What was still ringing at the splice comes back round with it.
-    for (let i = 0; i + samples < source.length; i += 1) data[i] += source[i + samples];
+    for (let c = 0; c < channels; c += 1) {
+      const source = rendered.getChannelData(c);
+      const data = loop.getChannelData(c);
+      for (let i = 0; i < samples; i += 1) data[i] = source[i];
+      // What was still ringing at the splice comes back round with it.
+      for (let i = 0; i + samples < source.length; i += 1) data[i] += source[i + samples];
+    }
 
     this.loops.set(held, loop);
     return loop;

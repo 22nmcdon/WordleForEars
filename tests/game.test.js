@@ -224,7 +224,7 @@ test('a lost round shares as X of its allowance', () => {
   for (let i = 0; i < game.allowed; i += 1) game = submitGuess(game, wrongGuess(puzzle, i));
 
   assert.equal(game.status, 'lost');
-  assert.match(shareText(game).split('\n')[0], /Panning #\d+ · Easy X\/3/);
+  assert.match(shareText(game).split('\n')[0], /Stereo #\d+ · Easy X\/3/);
 });
 
 test('a guess count is never more than the answers to choose from', () => {
