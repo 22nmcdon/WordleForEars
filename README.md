@@ -164,14 +164,49 @@ that doing it right is audible rather than merely scored:
 - Any server, account or cross-device sync. Everything lives in
   `localStorage`.
 
-## Adding a mode
+## Adding a tool
 
-A mode is data and eight functions in `src/modes/`, registered in
-`src/modes/index.js`. It says what it asks (`slots`), how to make a puzzle
-(`makePuzzle`), how to read a guess (`score`), what to play (`clues` + `play`),
-what to say when somebody is stuck (`hints`), and what the answer was
-(`reveal`, `weak`). Nothing else in the app knows which mode is showing — the
-log, the picker and the stats are all built from what the mode returns.
+A tool is three files, composed by `src/bench/registry.js`:
+
+```
+src/tools/eq.js     what it is, and open(el, {engine, onChange}) -> a live plugin
+src/work/eq.js      exercises over it: makePuzzle, score, hints, reveal, weak
+src/notes/eq.js     the long prose, for the person using it
+```
+
+**The tool knows nothing about a puzzle, an answer or a tier.** That is the
+point of the split, not tidiness: a tool that knew about answers could not be
+opened without a round, which is why changing an exercise used to tear the
+plugin down and stop the audio. Now the tool is what stays and an exercise is
+something that arrives, sets it up, and leaves.
+
+`src/bench/session.js` does the arriving and leaving. An exercise is data — a
+source, the A/B's name, `faultOf(puzzle)`, `targetOf(puzzle)` — and `attach`
+applies it in an order that matters: remember what the tool was doing, put the
+material on and **wait for it**, pin it to the puzzle, then fault, target,
+label, and the starting settings last so `onChange` fires once at the end.
+`detach` puts back everything the exercise imposed and nothing else: the drawn
+answer, the lock, the fault, the A/B. Not where the controls ended up —
+somebody may want to keep working from the curve they just built.
+
+Every tool implements the same lifecycle: `state`/`setState`, `read`/`readNow`,
+`setSource(id, opts)`, `loadFile`, `setFault`, `setTarget`, `showTarget` (null
+clears), `nameAB`, `lock`/`unlock`, `source`, `abLabel`, `material`, `destroy`.
+`tests/session.test.js` holds the decisions to account against a fake tool made
+of nothing but promises — which is how attach → detach → attach gets tested at
+all, given that nothing in this app had ever reused a plugin.
+
+### The exercise contract, in older words
+
+A tool's work is data and six functions. It says what it asks (`slots`), how to make a puzzle
+(`makePuzzle`), how to read a guess (`score(state, puzzle)`), what to say when
+somebody is stuck (`hints(puzzle)`), and what the answer was (`reveal`,
+`weak`). Nothing else in the app knows which tool is showing — the log, the
+picker and the stats are all built from what it returns.
+
+`score` takes two arguments where it took four: the answer and the tier both
+live on the puzzle already, and every scorer had grown a defensive
+`puzzle?.settings?.exercise ?? '…'` to find the third thing it needed.
 
 ### Readings
 
@@ -219,12 +254,8 @@ the tolerances that decide right from close — and renders as a control, with
 its value read back live and audible through `Play yours` before it is
 committed.
 
-A mode can also skip slots entirely and bring its own interface: set
-`surface: true` and implement `mount(el, context)`, returning `guess()`,
-`reveal({ live })`, `unlock()` and `destroy()`. That is how the EQ is a plugin
-rather than a picker, and the log, the daily and the attempts carry on working
-above it unchanged. `reveal({ live: true })` is **Show me**: it draws the
-target and does *not* lock the controls.
+All six are tools, so all six return no slots: a tool is answered on the tool.
+Slots are for the identification drills, which ask with chips.
 
 `tests/modes.test.js` holds every mode to that contract: that its own answer
 scores green in every cell, that every answer it can generate is answerable from
@@ -270,8 +301,9 @@ src/fx/             what more than one tool needs: FFT, impulse response
 src/notes/          what each tool is for, in prose, for the person using it
 src/read.js         the reading envelope: what a measurement is, and of what
 src/gap.js          comparing two readings without knowing their kind
-src/bench/          the workbench shell - the picker, the attempt log
-src/modes/          one file per exercise set, plus the shared scoring vocabulary
+src/tools/          one file per tool: what it is, and how to open one
+src/work/           one file per tool: the exercises over it, and the marking
+src/bench/          the registry, the session, the picker, the attempt log
 src/random.js       seeded PRNG + daily numbering
 src/game.js         the round, over whichever tool is asking (pure, no DOM)
 src/stats.js        localStorage persistence, per tool and tier

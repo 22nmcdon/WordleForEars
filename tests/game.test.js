@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MODES, modeOf } from '../src/modes/index.js';
+import { TOOLS as MODES, toolOf as modeOf } from '../src/bench/registry.js';
 import {
   scoreGuess, sameGuess, hintFor, hintsLeft, takeHint, showAnswer,
   createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal, settingsFor,
@@ -99,7 +99,7 @@ test('every tool has a hint ladder, and every rung says something', () => {
   for (const [id, tier, settings] of everyRound()) {
     const chosen = settingsFor(id, settings);
     const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `hint-${id}-${tier}` });
-    const ladder = modeOf(id).hints(puzzle.answer, tier, puzzle);
+    const ladder = modeOf(id).hints(puzzle);
     const where = `${id}/${tier}/${chosen.exercise ?? '-'}`;
 
     assert.ok(Array.isArray(ladder) && ladder.length >= 2, `${where} has no ladder`);
@@ -114,7 +114,7 @@ test('every tool has a hint ladder, and every rung says something', () => {
 test('the ladder is walked one rung at a time, and stops at the top', () => {
   const puzzle = makePuzzle({ mode: 'eq', tier: 'easy', seed: 'ladder' });
   let game = createGame(puzzle);
-  const rungs = modeOf('eq').hints(puzzle.answer, 'easy', puzzle);
+  const rungs = modeOf('eq').hints(puzzle);
 
   assert.equal(hintsLeft(game), rungs.length);
   for (const rung of rungs) {
@@ -173,7 +173,7 @@ test('scoring goes through the mode that asked the question', () => {
   const score = scoreGuess(answerAsGuess(puzzle), puzzle);
   assert.ok(score.correct);
   assert.equal(score.cells.length,
-    MODES.reverb.score(answerAsGuess(puzzle), puzzle.answer, 'easy', puzzle).cells.length);
+    MODES.reverb.score(answerAsGuess(puzzle), { ...puzzle, tier: 'easy' }).cells.length);
 });
 
 test('a mode\'s settings fill themselves in, and refuse what it does not offer', () => {

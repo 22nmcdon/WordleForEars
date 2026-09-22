@@ -1,7 +1,7 @@
 import { VERB_DEFAULTS, makeImpulse, roomProfile } from '../verb/ir.js';
 import { decayCurve, decayReading, monoOf } from '../fx/response.js';
 import { distance } from '../gap.js';
-import { VerbPlugin, writeSeconds } from '../verb/plugin.js';
+import { writeSeconds } from '../verb/plugin.js';
 import { LOOP_BEAT } from '../audio.js';
 import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
 
@@ -24,10 +24,6 @@ import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
  */
 
 /** What each exercise is played on, and what the other side of the A/B is. */
-const VERB_EXERCISES = {
-  match: { source: 'instrument', other: 'Target' },
-  tempo: { source: 'drums', other: 'Dry' },
-};
 
 /**
  * How far two rooms may be apart, in decibels of decay, and still match.
@@ -80,46 +76,43 @@ const PRE_DIVISIONS = [
   { id: 'eighth', label: 'an 8th', beats: 1 / 2 },
 ];
 
-export default {
-  id: 'reverb',
-  label: 'Reverb',
-  blurb: 'Build the room',
-  surface: true,
-  lede: 'A reverb, and a loop running through it. Build the same room you can '
-      + 'hear on the target — or a room that belongs to the track, answering on '
-      + 'the beat and gone before the next one.',
-  opening: 'Play the loop, build the room, then lock it in.',
-  advice: 'Decay is the easy half. What people miss is the gap before the room answers, and how much shorter the top decays than the bottom.',
+/**
+ * The two exercises, in the shape a session can set up.
+ *
+ * In match there is a room on the other side of the A/B. In the tempo
+ * exercise there is nothing there: what you compare against is the loop with
+ * no room on it at all.
+ */
+export const VERB_EXERCISES = {
+  match: {
+    id: 'match',
+    label: 'Match the space',
+    source: 'instrument',
+    other: 'Target',
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  tempo: {
+    id: 'tempo',
+    label: 'Fit the tempo',
+    source: 'drums',
+    other: 'Dry',
+    targetOf: () => ({ ...VERB_DEFAULTS, mix: 0 }),
+  },
+};
 
-  help: [
-    ['Play the loop, then build the room.',
-     'The left panel is the room itself: the gap before it answers, the walls arriving '
-     + 'one at a time, and the wash closing over them. The right panel is how it decays, '
-     + 'band by band, which is also exactly what your guess is marked against.'],
-    ['Pre-delay is the one to listen for.',
-     'It is the gap between the sound and the room, and it is what keeps a source in '
-     + 'front of its own reverb. People hear decay easily and pre-delay hardly at all, '
-     + 'which is why it is on the display.'],
-    ['HF decay is the other one.',
-     'Real rooms lose their top before they lose their bottom, and how much shorter the '
-     + 'highs ring is most of what makes a room sound like stone or like curtains. The '
-     + 'three curves pulling apart is that, on the screen.'],
-    ['You are judged on the decay, not the controls.',
-     'Two sets of settings that decay the same way are the same room. Auto gain is on, '
-     + 'so moving the mix does not change how loud it is - otherwise the wetter side of '
-     + 'the A/B would win every time.'],
-  ],
+export const VERB_WORK = {
+  tool: 'reverb',
+  opening: 'Play the loop, build the room, then lock it in.',
 
   settings: [
     {
       id: 'exercise',
       label: 'Exercise',
-      options: [
-        { id: 'match', label: 'Match the space' },
-        { id: 'tempo', label: 'Fit the tempo' },
-      ],
+      options: Object.values(VERB_EXERCISES).map(({ id, label }) => ({ id, label })),
     },
   ],
+
+  exercises: VERB_EXERCISES,
 
   tiers: {
     easy: { label: 'Easy', blurb: 'Decay and mix', guesses: 4, shape: false, detail: false },
@@ -174,7 +167,9 @@ export default {
 
   /* ---------- marking ---------- */
 
-  score(guess, answer, tier, puzzle) {
+  score(state, puzzle) {
+    const { answer, tier } = puzzle;
+    const guess = state;
     const exercise = puzzle?.settings?.exercise ?? 'match';
     const settings = { ...VERB_DEFAULTS, ...guess };
     // The rooms are built from numbers rather than recorded, so marking needs
@@ -193,7 +188,7 @@ export default {
     const error = gap.off;
 
     const close = VERB_CLOSE.match[tier];
-    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
+    const mark = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
     // Which way it is out, said in the terms the room is built in.
     const longer = this.decayOf(settings, rate) - this.decayOf({ ...VERB_DEFAULTS, ...answer }, rate);
@@ -203,9 +198,9 @@ export default {
       correct: error <= close,
       error,
       cells: [
-        { state, text: `${error.toFixed(1)} dB out` },
+        { state: mark, text: `${error.toFixed(1)} dB out` },
         {
-          state,
+          state: mark,
           text: error <= close ? 'that is the room'
             : Math.abs(longer) > 0.12 ? `${writeSeconds(Math.abs(longer))} too ${longer > 0 ? 'long' : 'short'}`
             : Math.abs(ahead) > 12 ? `answers ${Math.round(Math.abs(ahead))} ms too ${ahead > 0 ? 'late' : 'early'}`
@@ -318,42 +313,8 @@ export default {
     };
   },
 
-  /* ---------- the surface ---------- */
-
-  mount(el, { engine, puzzle, onChange }) {
-    const exercise = puzzle.settings.exercise;
-    const spec = VERB_EXERCISES[exercise];
-    const settings = { ...VERB_DEFAULTS };
-
-    const plugin = new VerbPlugin(el, { engine, settings, onChange, source: spec.source });
-    plugin.nameOther(spec.other);
-    // In match there is a room on the other side of the A/B. In the tempo
-    // exercise there is nothing there: what you compare against is the loop
-    // with no room on it at all.
-    plugin.setTarget(exercise === 'match' ? puzzle.answer : { ...VERB_DEFAULTS, mix: 0 });
-
-    return {
-      guess: () => ({ ...settings }),
-      reveal: ({ live = false } = {}) => {
-        if (exercise === 'match') plugin.showTarget({ ...VERB_DEFAULTS, ...puzzle.answer });
-        if (!live) plugin.lock();
-      },
-      unlock: () => plugin.unlock(),
-      toggle: () => plugin.toggle(),
-      destroy: () => plugin.destroy(),
-    };
-  },
-
-  clues() {
-    return [];
-  },
-
-  play() {
-    // The loop runs inside the plugin, under the player's own hands.
-  },
-
-  /** The way out, in two rungs, worked out from the answer. */
-  hints(answer, tier, puzzle) {
+  hints(puzzle) {
+    const { answer, tier } = puzzle;
     if ((puzzle?.settings?.exercise ?? 'match') === 'tempo') {
       return [
         `The room has to be gone by the time the next hit lands - `
@@ -377,7 +338,8 @@ export default {
     ];
   },
 
-  reveal(answer, tier, puzzle) {
+  reveal(puzzle) {
+    const { answer } = puzzle;
     if ((puzzle?.settings?.exercise ?? 'match') === 'tempo') {
       return {
         symbol: `${answer.clearBy === 1 ? 'one beat' : 'two beats'}`,
@@ -393,7 +355,8 @@ export default {
     };
   },
 
-  weak(answer, puzzle) {
+  weak(puzzle) {
+    const { answer } = puzzle;
     if ((puzzle?.settings?.exercise ?? 'match') === 'tempo') {
       return { key: 'in time', label: 'rooms that fit the track' };
     }

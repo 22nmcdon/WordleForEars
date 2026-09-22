@@ -54,13 +54,13 @@ export function dialled(guess, answer, spec) {
   const off = ratioed ? Math.log2(guess / answer) : guess - answer;
   const away = Math.abs(off);
 
-  const state = away <= spec.hit ? HIT : away <= spec.near ? NEAR : MISS;
+  const mark = away <= spec.hit ? HIT : away <= spec.near ? NEAR : MISS;
   const amount = spec.unit === 'oct' ? `${away.toFixed(1)} oct`
     : spec.unit === 'x' ? `${(2 ** away).toFixed(1)}×`
     : `${away.toFixed(spec.decimals ?? 0)} ${spec.unit}`;
 
   return {
-    state,
+    state: mark,
     text: state === HIT ? 'spot on' : `${amount} ${off < 0 ? spec.below : spec.above}`,
   };
 }

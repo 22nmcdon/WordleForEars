@@ -1,4 +1,5 @@
-import { MODES, MODE_IDS, modeOf } from './modes/index.js';
+import { TOOLS, TOOL_IDS, toolOf, exerciseOf } from './bench/registry.js';
+import { bench } from './bench/session.js';
 import {
   createGame, submitGuess, makePuzzle, dailySeed, practiceSeed, reveal,
   settingsFor, startingGuess, hintFor, hintsLeft, takeHint, showAnswer,
@@ -29,28 +30,34 @@ const writeSymbol = (target, text) => engraveNote(target, text);
 
 const engine = new Engine();
 
+const desk = bench();
+
 const ui = {
   playing: 'daily', // 'daily' | 'practice'
-  surface: null, // a mode that brings its own interface, mounted
+  // The tool, open, per id. Opened once and kept: the whole of this stage is
+  // that an exercise arriving is not a reason to destroy one. Switching tools
+  // still tears down, because six live plugins each holding a loop is six
+  // loops of audio for five tools nobody is looking at.
+  tool: null,
+  toolId: null,
   mode: 'eq',
   tier: 'easy',
   chosen: {}, // settings, per mode, so switching back finds them as you left them
   guess: {},
   game: null,
   log: null, // what has been tried this round, newest first
-  plays: 0,
 };
 
-const mode = () => modeOf(ui.mode);
+const tool = () => toolOf(ui.mode);
 const settings = () => settingsFor(ui.mode, ui.chosen[ui.mode] ?? {});
 
 /* ---------- setup row ---------- */
 
 /** The tools, on the page rather than behind a click. */
 function fillModes() {
-  $('#modes').innerHTML = MODE_IDS
+  $('#modes').innerHTML = TOOL_IDS
     .map((id) => `<button class="mode-pill" type="button" role="radio" data-train="${id}"`
-      + ` aria-checked="${id === ui.mode}" title="${MODES[id].blurb}">${MODES[id].label}</button>`)
+      + ` aria-checked="${id === ui.mode}" title="${TOOLS[id].blurb}">${TOOLS[id].label}</button>`)
     .join('');
 }
 
@@ -61,7 +68,7 @@ function syncModes() {
 }
 
 function fillTiers() {
-  const spec = mode();
+  const spec = tool();
   $('#tier').innerHTML = Object.entries(spec.tiers)
     .map(([id, tier]) => `<option value="${id}">${tier.label} — ${tier.blurb}</option>`)
     .join('');
@@ -71,7 +78,7 @@ function fillTiers() {
 
 function fillSettings() {
   const chosen = settings();
-  $('#settings').innerHTML = (mode().settings ?? []).map((setting) => `
+  $('#settings').innerHTML = (tool().settings ?? []).map((setting) => `
     <label class="field">
       <span class="field-label">${setting.label}</span>
       <select data-setting="${setting.id}">${setting.options
@@ -92,7 +99,7 @@ function buildPicker() {
   ui.guess = { ...dialled, ...Object.fromEntries(
     Object.entries(ui.guess).filter(([id]) => id in dialled)) };
 
-  renderPicker(picker, mode().slots(ui.tier), ui.guess, { write: writeSymbol });
+  renderPicker(picker, tool().slots(ui.tier), ui.guess, { write: writeSymbol });
 
   syncAnswer();
 }
@@ -107,16 +114,18 @@ function buildPicker() {
 function syncAnswer() {
   const submit = $('#submit');
 
-  if (mode().surface) {
-    // There is no "out of guesses" any more, so the only thing that closes the
-    // button is having got there.
+  const slots = tool().slots(ui.tier);
+
+  // A tool is answered on the tool. Only a drill asks with chips, and there
+  // is no "out of guesses" any more - so the only thing that closes the
+  // button is having got there.
+  if (!slots.length) {
     const live = ui.game.status !== 'solved';
     submit.disabled = !live;
     submit.textContent = live ? 'Lock it in' : 'That is it';
     return;
   }
 
-  const slots = mode().slots(ui.tier);
   syncPicker($('#picker'), slots, ui.guess);
 
   const { complete, dialling, summary } = pickerState(slots, ui.guess);
@@ -128,60 +137,77 @@ function syncAnswer() {
     : slots.length > 1 ? 'Pick one of each' : 'Submit guess';
 }
 
-/* ---------- the clue ---------- */
+/* ---------- the tool, and what is put on it ---------- */
 
-/** A mode with its own interface gets the sheet; everything else is hidden. */
-function mountSurface() {
-  ui.surface?.destroy();
-  ui.surface = null;
-
+/**
+ * Open the tool, if it is not already open.
+ *
+ * This is the whole of the inversion, from the shell's side. What used to be
+ * here destroyed the plugin and built a new one every time anything changed -
+ * a new round, a new tier, a new exercise - which meant the audio stopped and
+ * the controls went back to the middle several times a session, for reasons
+ * that had nothing to do with the tool.
+ *
+ * Now it is opened once per tool and kept. Switching to a different tool
+ * still tears the old one down: six live plugins each holding a rendered loop
+ * is six loops of audio for five tools nobody is looking at.
+ */
+async function openTool() {
   const surface = $('#surface');
-  const own = mode().surface;
 
-  surface.hidden = !own;
-  $('#clue').hidden = !!own;
-  $('#picker').hidden = !!own;
-  // Not the advice. It is a line about the tool, and the tools with a surface
-  // are exactly the ones that have any - so this used to hide all of it, every
-  // time, in the same synchronous pass that buildClue had just written it.
-  // Five paragraphs, set and never seen by anybody.
+  if (ui.toolId === ui.mode && ui.tool) return ui.tool;
 
-  if (!own) {
-    surface.textContent = '';
-    return;
-  }
+  // Awaited, and the await is not decoration. Clearing the bench runs the
+  // detach, which puts the exercise's impositions back - and a detach that
+  // runs after the tool has been destroyed is writing to an element that is
+  // no longer in the page. Tearing down first threw on the first tool switch.
+  await desk.clear();
+  ui.tool?.destroy();
+  ui.tool = null;
+  surface.textContent = '';
 
-  ui.surface = mode().mount(surface, {
-    engine,
-    puzzle: ui.game.puzzle,
-    tier: ui.tier,
-    settings: settings(),
-    onChange: () => syncAnswer(),
-  });
+  ui.tool = toolOf(ui.mode).open(surface, { engine, onChange: () => syncAnswer() });
+  ui.toolId = ui.mode;
+  return ui.tool;
 }
 
-function buildClue() {
-  const row = $('#clue');
-  row.textContent = '';
+/**
+ * Put this round's exercise on the tool.
+ *
+ * Awaited, and what is waited for is the material: what an answer is marked
+ * against is rendered before the round begins rather than filled in from an
+ * unawaited block while somebody is already dialling. Until this stage the
+ * compressor could be marked against a synthetic probe because its loop had
+ * not arrived yet, and nothing said so.
+ */
+async function putExercise() {
+  const surface = $('#surface');
+  surface.hidden = false;
+  $('#clue').hidden = true;
+  $('#picker').hidden = true;
+  // Not the advice. It is a line about the tool, and this used to hide all of
+  // it, every time, in the same synchronous pass that buildClue had just
+  // written it. Five paragraphs, set and never seen by anybody.
 
-  for (const clue of mode().clues(ui.tier, settings())) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = clue.primary ? 'play-btn' : 'link-btn';
-    button.dataset.clue = clue.id;
-    button.textContent = clue.label;
-    row.appendChild(button);
-  }
+  await desk.put(await openTool(), exerciseOf(ui.mode, settings()), ui.game.puzzle);
+  syncAnswer();
+}
 
-  const plays = document.createElement('span');
-  plays.className = 'plays';
-  plays.id = 'plays';
-  row.appendChild(plays);
-
-  const advice = mode().advice;
+/**
+ * The two lines above the tool: what it is, and the one thing worth saying
+ * before you touch it.
+ *
+ * What was here also built a row of clue buttons. Every tool returned an
+ * empty list of clues - has done since they all became surfaces - so the row,
+ * the play counter and `mode.play()` were unreachable for three stages. The
+ * split settled the question the last stage left open: the work modules carry
+ * no transport at all, because a drill on a tool plays through the tool.
+ */
+function buildHead() {
+  const advice = tool().advice;
   $('#advice').hidden = !advice;
   $('#advice').textContent = advice ?? '';
-  $('#lede').textContent = mode().lede;
+  $('#lede').textContent = tool().lede;
   buildNotes();
 }
 
@@ -209,28 +235,9 @@ function buildNotes() {
     .join('');
 }
 
-function playClue(id) {
-  const clues = mode().clues(ui.tier, settings());
-  const clue = clues.find((c) => c.id === id) ?? clues[0];
-
-  engine.ensure();
-  engine.stop();
-  mode().play(engine, {
-    puzzle: ui.game.puzzle,
-    clue: clue.id,
-    settings: settings(),
-    tier: ui.tier,
-    // What the controls are on right now, so "play yours" is yours.
-    guess: { ...ui.guess },
-  });
-
-  ui.plays += 1;
-  $('#plays').textContent = ui.plays === 1 ? 'played once' : `played ${ui.plays} times`;
-}
-
 /* ---------- lifecycle ---------- */
 
-function startGame({ fresh = false } = {}) {
+async function startGame({ fresh = false } = {}) {
   const chosen = settings();
   const seed = ui.playing === 'daily'
     ? dailySeed(ui.mode, ui.tier, chosen)
@@ -238,13 +245,17 @@ function startGame({ fresh = false } = {}) {
 
   const puzzle = makePuzzle({ mode: ui.mode, tier: ui.tier, settings: chosen, seed });
   ui.game = createGame(puzzle, { mode: ui.playing });
-  ui.plays = 0;
 
-  engine.stop();
-  buildClue();
+  buildHead();
   buildPicker();
-  mountSurface();
   buildLog();
+
+  // Note what is NOT here any more: `engine.stop()`. Starting a round used to
+  // silence everything, because the plugin was about to be destroyed anyway.
+  // The tool now outlives the round, so a new exercise arrives as a crossfade
+  // on a loop that never stopped - which is the whole of what this stage is
+  // for, heard rather than read.
+  await putExercise();
 
   // The daily is no longer locked once it has been played. It stays the same
   // puzzle for everybody on the same day - which is the whole of what made it
@@ -255,7 +266,7 @@ function startGame({ fresh = false } = {}) {
   // the board does.
   render();
   // A mode with its own interface is not answered by naming anything.
-  say(mode().opening ?? 'Play it, then name what you heard.');
+  say(tool().opening ?? 'Play it, then name what you heard.');
 }
 
 /**
@@ -269,9 +280,9 @@ function startGame({ fresh = false } = {}) {
 function buildLog() {
   ui.log = makeLog($('#log'), {
     write: writeSymbol,
-    headings: mode().surface
-      ? ['how close', 'where']
-      : mode().slots(ui.tier).map((slot) => slot.heading ?? slot.id),
+    headings: tool().slots(ui.tier).length
+      ? tool().slots(ui.tier).map((slot) => slot.heading ?? slot.id)
+      : ['how close', 'where'],
   });
 }
 
@@ -282,12 +293,12 @@ function say(text, { matched = false } = {}) {
 }
 
 function onSubmit() {
-  const slots = mode().slots(ui.tier, settings());
-  const own = mode().surface;
-  if (!own && !slots.every((slot) => ui.guess[slot.id] !== undefined)) return;
+  const slots = tool().slots(ui.tier, settings());
+  const onTool = !slots.length;
+  if (!onTool && !slots.every((slot) => ui.guess[slot.id] !== undefined)) return;
 
   const before = ui.game;
-  const next = submitGuess(before, own ? ui.surface.guess() : { ...ui.guess });
+  const next = submitGuess(before, onTool ? ui.tool.state() : { ...ui.guess });
   ui.game = next;
 
   if (next.error) {
@@ -300,7 +311,7 @@ function onSubmit() {
   // attempt is an adjustment of this one.
   ui.guess = Object.fromEntries(
     Object.entries(ui.guess).filter(([id]) =>
-      mode().slots(ui.tier).find((slot) => slot.id === id)?.kind === 'range'));
+      tool().slots(ui.tier).find((slot) => slot.id === id)?.kind === 'range'));
 
   const attempt = next.guesses[next.guesses.length - 1];
   const n = ui.log.add(attempt.score);
@@ -356,7 +367,12 @@ function finish(game) {
   // chasing, drawn over the one you built. Asked for rather than arrived at,
   // the controls stay live: the point of being shown a target is to be able to
   // move onto it and hear what closing the gap sounds like.
-  if (mode().surface) ui.surface?.reveal({ live: !solved });
+  // The answer, drawn on the tool. Asked for rather than arrived at, the
+  // controls stay live: the point of being shown a target is to be able to
+  // move onto it and hear what closing the gap sounds like.
+  const exercise = exerciseOf(ui.mode, settings());
+  ui.tool?.showTarget(exercise.answerOf?.(game.puzzle) ?? game.puzzle.answer ?? null);
+  if (solved) ui.tool?.lock();
 }
 
 /* ---------- the way out ---------- */
@@ -408,12 +424,12 @@ function render() {
 
   const status = $('#puzzleStatus');
   status.textContent = ui.playing === 'daily'
-    ? `Daily #${puzzleNumber()} · ${mode().tiers[game.puzzle.tier].label}`
-    : `Practice · ${mode().tiers[game.puzzle.tier].label}`;
+    ? `Daily #${puzzleNumber()} · ${tool().tiers[game.puzzle.tier].label}`
+    : `Practice · ${tool().tiers[game.puzzle.tier].label}`;
   status.dataset.state = game.status === 'playing' ? 'playing' : 'done';
 
-  $('#modeMark').textContent = mode().label;
-  $('#modeBlurb').textContent = mode().blurb.toLowerCase();
+  $('#modeMark').textContent = tool().label;
+  $('#modeBlurb').textContent = tool().blurb.toLowerCase();
 
   const solved = game.status === 'solved';
   $('#picker').classList.toggle('done', solved);
@@ -441,9 +457,9 @@ function render() {
 
 function showStats() {
   const stats = getStats(ui.playing, ui.mode, ui.tier);
-  const tier = mode().tiers[ui.tier];
+  const tier = tool().tiers[ui.tier];
 
-  $('#statsMode').textContent = mode().label;
+  $('#statsMode').textContent = tool().label;
   $('#stats-scope').textContent =
     `${ui.playing === 'daily' ? 'Daily' : 'Practice'} · ${tier.label} · ${tier.blurb}`;
 
@@ -478,40 +494,16 @@ function showStats() {
 /* ---------- the cheat sheet ---------- */
 
 function fillHelp() {
-  $('#helpMode').textContent = mode().label;
-  $('#helpLede').textContent = mode().lede;
+  $('#helpMode').textContent = tool().label;
+  $('#helpLede').textContent = tool().lede;
 
-  const clues = mode().clues(ui.tier, settings());
-  const slots = mode().slots(ui.tier, settings());
-  const tier = mode().tiers[ui.tier];
+  const tier = tool().tiers[ui.tier];
 
-  // A mode that brings its own interface explains its own interface: there is
-  // nothing useful the shell can say about a plugin it has never seen.
-  const entries = mode().help ? mode().help.map((entry) => [...entry]) : mode().surface ? [
-    ['Play the loop, then work the plugin.',
-     'Yours and the other side swap instantly, so you can flip while it runs.'],
-    ['You are judged on what comes out, not on the controls.',
-     'Two different ways of arriving at the same result are the same answer.'],
-  ] : [
-    ['Press ' + clues[0].label.toLowerCase() + ', then name what you heard.',
-     clues.length > 1
-       ? `${clues.slice(1).map((c) => c.label).join(' and ')} ${clues.length > 2 ? 'are' : 'is'} there `
-         + 'to compare against. Play it as many times as you like.'
-       : 'Play it as many times as you like.'],
-    [slots.some((slot) => slot.kind === 'range')
-      ? (slots.length > 1 ? `${slots.length} controls to dial.` : 'One control to dial.')
-      : (slots.length > 1 ? 'Two things to name.' : 'One thing to name.'),
-     slots.map((slot) => slot.label.replace(/\?$/, '')).join(', and ')
-       + `. ${tier.label}: ${tier.blurb.toLowerCase()}.`],
-  ];
+  // Every tool brings its own interface, and explains its own interface:
+  // there is nothing useful the shell can say about a plugin it has not seen.
+  const entries = tool().help.map((entry) => [...entry]);
 
-  entries.push(['Try it as many times as you like.',
-    'There is no limit and nothing to run out of - the whole of the value is '
-    + 'moving something, hearing what it did to the reading, and moving it '
-    + 'again. Hint says what kind of move it is; Show me draws the answer on '
-    + 'the tool and leaves the controls live, so you can hear your way onto it.']);
-
-  for (const spec of mode().settings ?? []) {
+  for (const spec of tool().settings ?? []) {
     entries.push([`${spec.label}: ${spec.options.map((o) => o.label).join(', ')}.`,
       spec.id === 'exercise'
         ? `${spec.options.length} different exercises, not ${spec.options.length} views of one `
@@ -537,11 +529,6 @@ function setPlaying(playing) {
 }
 
 function wire() {
-  $('#clue').addEventListener('click', (e) => {
-    const button = e.target.closest('[data-clue]');
-    if (button) playClue(button.dataset.clue);
-  });
-
   for (const button of document.querySelectorAll('[data-mode]')) {
     button.addEventListener('click', () => {
       if (ui.playing === button.dataset.mode) return;
@@ -567,7 +554,7 @@ function wire() {
     e.preventDefault();
 
     const step = e.key === 'ArrowRight' ? 1 : -1;
-    const next = MODE_IDS[(MODE_IDS.indexOf(ui.mode) + step + MODE_IDS.length) % MODE_IDS.length];
+    const next = TOOL_IDS[(TOOL_IDS.indexOf(ui.mode) + step + TOOL_IDS.length) % TOOL_IDS.length];
     ui.mode = next;
     syncModes();
     fillTiers();
@@ -599,7 +586,7 @@ function wire() {
     const dial = e.target.closest('[data-dial]');
     if (!dial) return;
 
-    const slot = mode().slots(ui.tier).find((s) => s.id === dial.dataset.dial);
+    const slot = tool().slots(ui.tier).find((s) => s.id === dial.dataset.dial);
     ui.guess[slot.id] = dialValue(slot, dial.value);
     syncAnswer();
   });
@@ -632,8 +619,7 @@ function wire() {
     if (e.code === 'Space') {
       e.preventDefault();
       // Space is the transport wherever a musician meets one.
-      if (mode().surface) ui.surface?.toggle?.();
-      else playClue(mode().clues(ui.tier, settings())[0].id);
+      ui.tool?.toggle?.();
     }
     if (e.key === 'Enter' && !$('#submit').disabled) onSubmit();
   });

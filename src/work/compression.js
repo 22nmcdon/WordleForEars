@@ -1,7 +1,7 @@
 import { COMP_DEFAULTS, analyse, runCompressor } from '../comp/dsp.js';
 import { reductionReading } from '../comp/reading.js';
 import { distance } from '../gap.js';
-import { CompPlugin, writeTime, writeRatio } from '../comp/plugin.js';
+import { writeTime, writeRatio } from '../comp/plugin.js';
 import { HIT, NEAR, MISS, logPick, toStep } from './scoring.js';
 
 /**
@@ -23,11 +23,6 @@ import { HIT, NEAR, MISS, logPick, toStep } from './scoring.js';
  */
 
 /** What each exercise is played on, and what it is marked on. */
-const COMP_EXERCISES = {
-  match: { source: 'drums', key: null, other: 'Target' },
-  fix: { source: 'drums', key: null, other: 'Untreated' },
-  duck: { source: 'bass', key: 'kick', other: 'Untreated' },
-};
 
 /**
  * Beats in a loop. `renderLoop` builds two bars of four, and both the
@@ -213,47 +208,61 @@ function materialOf(puzzle) {
 
 const settle = (guess) => ({ ...COMP_DEFAULTS, ...guess });
 
-export default {
-  id: 'compression',
-  label: 'Compression',
-  blurb: 'Work the compressor',
-  surface: true,
-  lede: 'A compressor, and a loop running through it. Match the one on the '
-      + 'target, level out a loop that will not sit still, or key it off the '
-      + 'kick and get out of the way.',
-  opening: 'Play the loop, work the compressor, then lock it in.',
+/**
+ * The three exercises, in the shape a session can set up.
+ *
+ * This is the descriptor that used to be spelled out inside `mount` - the
+ * source, the key, the A/B's name, the fault and the target - and having it
+ * as data is what lets one tool be handed from one exercise to the next
+ * without being destroyed in between.
+ *
+ * In match there is a compressor on the other side of the A/B. In the other
+ * two there is nothing there: what you compare against is the loop untouched,
+ * which is what a bypass button is.
+ */
+export const COMP_EXERCISES = {
+  match: {
+    id: 'match',
+    label: 'Match the target',
+    source: 'drums',
+    sourceOptions: { key: null },
+    other: 'Target',
+    faultOf: () => null,
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  fix: {
+    id: 'fix',
+    label: 'Even it out',
+    source: 'drums',
+    sourceOptions: { key: null },
+    other: 'Untreated',
+    faultOf: (puzzle) => ({ uneven: puzzle.uneven ?? 0 }),
+    targetOf: () => ({ ...COMP_DEFAULTS, mix: 0 }),
+  },
+  duck: {
+    id: 'duck',
+    label: 'Duck it',
+    source: 'bass',
+    sourceOptions: { key: 'kick' },
+    other: 'Untreated',
+    faultOf: () => null,
+    targetOf: () => ({ ...COMP_DEFAULTS, mix: 0 }),
+  },
+};
 
-  help: [
-    ['Play the loop, then work the compressor.',
-     'Drag the display sideways to move the threshold, or drag the handle at the top '
-     + 'of the curve to set the ratio. The trace beside it is what the compressor is '
-     + 'doing to this loop, hit by hit, and it follows the knobs whether or not '
-     + 'anything is playing.'],
-    ['The detector is the half nobody touches.',
-     'Peak hears transients and RMS hears loudness. The key filters decide what the '
-     + 'detector is allowed to hear, which is how you stop a kick pulling a whole mix '
-     + 'down every bar - press listen to hear what it is reacting to.'],
-    ['Auto gain is on, and it is not being polite.',
-     'A compressor changes loudness, so without it the louder side of the A/B would win '
-     + 'every time and you would never hear the compression at all.'],
-    ['You are judged on what it did, not on where the knobs are.',
-     'Two settings that treat the loop the same way are the same answer. Evening out a '
-     + 'loop has no one answer at all: it is done when the loop sits still, and '
-     + 'flattening it is not the same thing as levelling it.'],
-  ],
-  advice: 'The hardest thing here, and the plan says so: this is difficult even for people who do it for a living. Listen to the transients, and to what happens between the hits.',
+export const COMP_WORK = {
+  tool: 'compression',
+  opening: 'Play the loop, work the compressor, then lock it in.',
 
   settings: [
     {
       id: 'exercise',
       label: 'Exercise',
-      options: [
-        { id: 'match', label: 'Match the target' },
-        { id: 'fix', label: 'Even out the loop' },
-        { id: 'duck', label: 'Duck under the kick' },
-      ],
+      options: Object.values(COMP_EXERCISES).map(({ id, label }) => ({ id, label })),
     },
   ],
+
+  exercises: COMP_EXERCISES,
 
   tiers: {
     easy: { label: 'Easy', blurb: 'Threshold and ratio', guesses: 4, timing: false, knee: false },
@@ -307,7 +316,9 @@ export default {
 
   /* ---------- marking ---------- */
 
-  score(guess, answer, tier, puzzle) {
+  score(state, puzzle) {
+    const { answer, tier } = puzzle;
+    const guess = state;
     const exercise = puzzle?.settings?.exercise ?? 'match';
     const material = materialOf(puzzle);
     const settings = settle(guess);
@@ -340,15 +351,15 @@ export default {
     const error = gap.off;
     const { depth, shape } = gap.detail;
     const close = COMP_CLOSE.match[tier];
-    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
+    const mark = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
     return {
       correct: error <= close,
       error,
       cells: [
-        { state, text: `${error.toFixed(1)} dB out` },
+        { state: mark, text: `${error.toFixed(1)} dB out` },
         {
-          state,
+          state: mark,
           text: error <= close ? 'sits on it'
             : Math.abs(depth) > shape ? `${Math.abs(depth).toFixed(1)} dB too ${depth > 0 ? 'gentle' : 'hard'}`
             : 'right depth, wrong timing',
@@ -421,15 +432,15 @@ export default {
 
     const level = off <= close;
     const gentle = -deepest <= ceiling;
-    const state = level && gentle ? HIT : (off <= close * 2.2 && gentle) ? NEAR : MISS;
+    const mark = level && gentle ? HIT : (off <= close * 2.2 && gentle) ? NEAR : MISS;
 
     return {
       correct: level && gentle,
       error: off,
       cells: [
-        { state, text: `${off.toFixed(1)} dB out of line` },
+        { state: mark, text: `${off.toFixed(1)} dB out of line` },
         {
-          state: gentle ? state : MISS,
+          state: gentle ? mark : MISS,
           text: !gentle ? `${(-deepest).toFixed(0)} dB of reduction — squashed`
             : level ? 'sits still'
             : off > uneven / 3 ? 'barely touched'
@@ -474,7 +485,7 @@ export default {
 
     const depthOk = depthOff <= close;
     const timeOk = timeOff <= 0.42; // a third of the way to twice as long
-    const state = depthOk && timeOk ? HIT : (depthOk || timeOff <= 0.8) ? NEAR : MISS;
+    const mark = depthOk && timeOk ? HIT : (depthOk || timeOff <= 0.8) ? NEAR : MISS;
 
     return {
       correct: depthOk && timeOk,
@@ -519,70 +530,6 @@ export default {
     };
   },
 
-  /* ---------- the surface ---------- */
-
-  mount(el, { engine, puzzle, onChange }) {
-    const exercise = puzzle.settings.exercise;
-    const spec = COMP_EXERCISES[exercise];
-    const settings = { ...COMP_DEFAULTS };
-
-    const plugin = new CompPlugin(el, {
-      engine,
-      settings,
-      onChange,
-      source: spec.source,
-      key: spec.key,
-      uneven: puzzle.uneven ?? 0,
-    });
-
-    plugin.nameOther(spec.other);
-    // In match there is a compressor on the other side of the A/B. In the
-    // other two there is nothing there: what you are comparing against is the
-    // loop untouched, which is what a bypass button is.
-    plugin.setTarget(exercise === 'match' ? puzzle.answer : { ...COMP_DEFAULTS, mix: 0 });
-
-    // The audio a guess is read against, rendered once and kept on the puzzle.
-    // The sample picker changes what you monitor and never what you are marked
-    // on - otherwise the way to pass would be to switch to pink noise, where
-    // every setting does much the same thing and every answer looks right.
-    (async () => {
-      try {
-        const signal = await engine.renderLoop(spec.source, { uneven: puzzle.uneven ?? 0 });
-        const key = spec.key ? await engine.renderLoop(spec.key) : null;
-        // The same bed without the fault in it - what evening the loop out is
-        // aiming at, and never played: it is the answer, not a clue.
-        const even = puzzle.uneven ? await engine.renderLoop(spec.source) : signal;
-        puzzle.material = {
-          rate: engine.ctx.sampleRate,
-          samples: signal.getChannelData(0),
-          even: even.getChannelData(0),
-          key: key ? key.getChannelData(0) : null,
-        };
-      } catch {
-        // No audio yet; scoring falls back to its own probe.
-      }
-    })();
-
-    return {
-      guess: () => ({ ...settings }),
-      reveal: ({ live = false } = {}) => {
-        if (exercise === 'match') plugin.showTarget(puzzle.answer);
-        if (!live) plugin.lock();
-      },
-      unlock: () => plugin.unlock(),
-      toggle: () => plugin.toggle(),
-      destroy: () => plugin.destroy(),
-    };
-  },
-
-  clues() {
-    return [];
-  },
-
-  play() {
-    // The loop runs inside the plugin, under the player's own hands.
-  },
-
   /**
    * The way out, in two rungs, worked out from the answer.
    *
@@ -591,7 +538,8 @@ export default {
    * of compression this is, and the second puts a region round the control
    * that is doing the work.
    */
-  hints(answer, tier, puzzle) {
+  hints(puzzle) {
+    const { answer, tier } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'match';
 
     if (exercise === 'fix') {
@@ -628,7 +576,8 @@ export default {
     ];
   },
 
-  reveal(answer, tier, puzzle) {
+  reveal(puzzle) {
+    const { answer } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'match';
 
     if (exercise === 'fix') {
@@ -653,7 +602,8 @@ export default {
     };
   },
 
-  weak(answer, puzzle) {
+  weak(puzzle) {
+    const { answer } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'match';
     if (exercise === 'fix') return { key: 'levelling', label: 'levelling a loop' };
     if (exercise === 'duck') return { key: 'sidechain', label: 'sidechain ducking' };

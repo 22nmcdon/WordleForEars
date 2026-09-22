@@ -1,7 +1,17 @@
-import { newStrip, curveReading, writeHz } from '../eq/filters.js';
+import { curveReading, writeHz } from '../eq/filters.js';
 import { distance } from '../gap.js';
-import { EQPlugin } from '../eq/plugin.js';
 import { HIT, NEAR, MISS, logPick, toStep, toThirdOctave, pick } from './scoring.js';
+
+/**
+ * What you do with an EQ, as opposed to what an EQ is.
+ *
+ * The other half of what used to be one mode file. An exercise here knows
+ * about answers, tolerances and what counts as close; it knows nothing about
+ * canvases, and it never mounts anything. Setting a tool up is
+ * `src/bench/session.js`'s job, and what it needs is the four small functions
+ * at the top of each exercise - where the material comes from, what is on the
+ * other side of the A/B, what fault is in the sample, and what the answer is.
+ */
 
 const writeDb = (db) => `${db > 0 ? '+' : ''}${db.toFixed(1).replace(/\.0$/, '')} dB`;
 
@@ -25,49 +35,50 @@ const TROUBLE = [
  */
 const CLOSE_ENOUGH = { easy: 2.5, medium: 1.8, hard: 1.2 };
 
-export default {
-  id: 'eq',
-  label: 'EQ',
-  blurb: 'Shape it until it matches',
-  surface: true,
-  lede: 'A channel EQ, and a loop running through it. Drag the bands until '
-      + 'yours sounds like the target — or until the problem in the sample is gone.',
-  opening: 'Play the loop, shape the EQ, then lock it in.',
+/**
+ * The two exercises, in the shape a session can set up.
+ *
+ * This is the descriptor that used to be spelled out inside `mount` - the
+ * source, the A/B's name, the fault and the target - and having it as data is
+ * what lets one tool be handed from one exercise to the next without being
+ * destroyed in between.
+ */
+export const EQ_EXERCISES = {
+  match: {
+    id: 'match',
+    label: 'Match the target',
+    source: 'mix',
+    other: 'Target',
+    faultOf: () => null,
+    targetOf: (puzzle) => puzzle.answer,
+    answerOf: (puzzle) => puzzle.answer,
+  },
+  fix: {
+    id: 'fix',
+    label: 'Fix the sample',
+    source: 'mix',
+    // In the fix exercise there is no target to hear: the other side of the
+    // A/B is the sample with your EQ out of the way, which is a bypass button.
+    other: 'Bypass',
+    faultOf: (puzzle) => puzzle.fault,
+    targetOf: () => [],
+    answerOf: (puzzle) => [{ ...puzzle.fault, gain: -puzzle.fault.gain }],
+  },
+};
 
-  help: [
-    ['Play the loop, then shape the EQ.',
-     'Drag a band to move it; the wheel over a band is its Q; the buttons under the '
-     + 'display turn one on and off. Yours and the other side swap instantly, so you '
-     + 'can flip while it runs.'],
-    ['Any band can be any kind of band.',
-     'Peak, shelf or cut, chosen under the display - and a cut can be 12, 24 or 48 dB '
-     + 'an octave. Six bands that can each be anything is a parametric EQ rather than '
-     + 'a tone control.'],
-    ['It can be typed, and it can be nudged.',
-     'The numbers under the sliders are fields: 3.15k, 3150 and 3k15 are all the same '
-     + 'frequency. With the display focused, the arrow keys move the selected band a '
-     + 'semitone and half a decibel at a time, shift makes them fine, and the bracket '
-     + 'keys are Q.'],
-    ['The analyser is a picture, not a reading.',
-     'Tilt it three decibels an octave and a balanced mix reads level instead of '
-     + 'sloping away, so what stands out is what actually stands out. Peak hold catches '
-     + 'the resonance that only shows itself on one note of the bar. Neither changes '
-     + 'the sound or the marking.'],
-    ['You are judged on the curve, not the controls.',
-     'Two different sets of bands that make the same shape are the same answer - what is '
-     + 'compared is what comes out.'],
-  ],
+export const EQ_WORK = {
+  tool: 'eq',
+  opening: 'Play the loop, shape the EQ, then lock it in.',
 
   settings: [
     {
       id: 'exercise',
       label: 'Exercise',
-      options: [
-        { id: 'match', label: 'Match the target' },
-        { id: 'fix', label: 'Fix the sample' },
-      ],
+      options: Object.values(EQ_EXERCISES).map(({ id, label }) => ({ id, label })),
     },
   ],
+
+  exercises: EQ_EXERCISES,
 
   tiers: {
     easy: { label: 'Easy', blurb: 'One band, and a big move', guesses: 4, bands: 1, size: [7, 11] },
@@ -75,7 +86,7 @@ export default {
     hard: { label: 'Hard', blurb: 'Three bands, and subtle', guesses: 4, bands: 3, size: [2.5, 5] },
   },
 
-  /** The round is played on the plugin, so there is nothing to pick from. */
+  /** The round is played on the tool, so there is nothing to pick from. */
   slots() {
     return [];
   },
@@ -124,27 +135,28 @@ export default {
    * marked you down for arriving by a different route would be teaching the
    * plugin rather than the ear. What is compared is what comes out.
    */
-  score(guess, answer, tier) {
+  score(state, puzzle) {
+    const { answer, tier } = puzzle;
     const rate = 48000;
     // Readings rather than bare curves. The EQ cached nothing at all before
     // this - `curveOf` ran three times a frame on the display and twice more
     // here, which is five answers to one question with nothing saying they
     // agree. Now the plugin and the scorer ask the same way.
-    const gap = distance(curveReading(guess, rate), curveReading(answer, rate));
+    const gap = distance(curveReading(state, rate), curveReading(answer, rate));
     const worst = gap.detail.louder;
     const worstAt = gap.detail.hz;
 
     const error = gap.off;
     const close = CLOSE_ENOUGH[tier];
-    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
+    const mark = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
     return {
       correct: error <= close,
       error,
       cells: [
-        { state, text: `${error.toFixed(1)} dB out` },
+        { state: mark, text: `${error.toFixed(1)} dB out` },
         {
-          state,
+          state: mark,
           text: error <= close
             ? 'sits on it'
             : `${writeHz(worstAt)} ${worst > 0 ? 'too hot' : 'too shy'}`,
@@ -185,7 +197,8 @@ export default {
    * region - not a frequency, because being handed the frequency is the
    * reveal, and that has its own button.
    */
-  hints(answer, tier, puzzle) {
+  hints(puzzle) {
+    const { answer } = puzzle;
     const bands = puzzle?.fault
       ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
       : answer;
@@ -213,46 +226,8 @@ export default {
         + `and ${biggest.q < 1.2 ? 'wide' : biggest.q < 3 ? 'fairly narrow' : 'very narrow'}.`,
     ];
   },
-
-  /* ---------- the surface ---------- */
-
-  mount(el, { engine, puzzle, onChange }) {
-    const bands = newStrip();
-    const fix = puzzle.settings.exercise === 'fix';
-
-    const plugin = new EQPlugin(el, { engine, bands, onChange, source: fix ? 'mix' : 'mix' });
-    plugin.setFault(fix ? puzzle.fault : null);
-    plugin.setTarget(fix ? [] : puzzle.answer);
-    // In the fix exercise there is no target to hear: the other side of the
-    // A/B is the sample with your EQ out of the way, which is what a bypass
-    // button is for.
-    plugin.nameOther(fix ? 'Bypass' : 'Target');
-
-    return {
-      guess: () => bands.map((band) => ({ ...band })),
-      reveal: ({ live = false } = {}) => {
-        plugin.showTarget(fix
-          ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
-          : puzzle.answer);
-        // Shown on request rather than at the end of the round: the target is
-        // drawn over yours and the bands stay draggable, so you can hear your
-        // way onto it instead of only being told where it was.
-        if (!live) plugin.lock();
-      },
-      unlock: () => plugin.unlock(),
-      destroy: () => plugin.destroy(),
-    };
-  },
-
-  clues() {
-    return [];
-  },
-
-  play() {
-    // The loop runs inside the plugin, under the player's own hands.
-  },
-
-  reveal(answer, tier, puzzle) {
+  reveal(puzzle) {
+    const { answer } = puzzle;
     const bands = puzzle?.fault
       ? [{ ...puzzle.fault, gain: -puzzle.fault.gain }]
       : answer;
@@ -263,7 +238,8 @@ export default {
     };
   },
 
-  weak(answer, puzzle) {
+  weak(puzzle) {
+    const { answer } = puzzle;
     const band = puzzle?.fault ?? answer[0];
     const zone = TROUBLE.find((t) => band.frequency >= t.low && band.frequency < t.high);
     return { key: zone ? zone.name : writeHz(band.frequency), label: zone ? zone.name : writeHz(band.frequency) };

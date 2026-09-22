@@ -5,7 +5,7 @@ import {
   staticGain, compressorCore, runCompressor, analyse, autoGain, signalRms, COMP_DEFAULTS,
 } from '../src/comp/dsp.js';
 import { workletSource } from '../src/comp/node.js';
-import compression from '../src/modes/compression.js';
+import { COMP_WORK as compression } from '../src/work/compression.js';
 import { engraveNote } from '../src/engrave.js';
 
 const RATE = 48000;
@@ -215,19 +215,19 @@ test('matching is marked on what the compressor did, not on where the knobs are'
   const answer = { ...COMP_DEFAULTS, threshold: -24, ratio: 4, attack: 10, release: 150 };
   const puzzle = { settings: { exercise: 'match' }, answer };
 
-  assert.ok(compression.score(answer, answer, 'hard', puzzle).correct, 'its own answer passes');
+  assert.ok(compression.score(answer, { ...puzzle, tier: 'hard' }).correct, 'its own answer passes');
 
   // Half the threshold's distance from the same curve, arrived at through the
   // knee instead: a different set of numbers doing a very similar thing.
   const elsewhere = { ...answer, knee: 18, threshold: -25.5 };
-  const score = compression.score(elsewhere, answer, 'easy', puzzle);
+  const score = compression.score(elsewhere, { ...puzzle, tier: 'easy' });
   assert.ok(score.error < 1.2, `a near-identical response read ${score.error.toFixed(2)} dB out`);
 });
 
 test('a compressor doing nothing does not pass for one that is working', () => {
   const answer = { ...COMP_DEFAULTS, threshold: -30, ratio: 8, attack: 5, release: 120 };
   const puzzle = { settings: { exercise: 'match' }, answer };
-  const idle = compression.score({ ...COMP_DEFAULTS, ratio: 1 }, answer, 'easy', puzzle);
+  const idle = compression.score({ ...COMP_DEFAULTS, ratio: 1 }, { ...puzzle, tier: 'easy' });
 
   assert.ok(!idle.correct, 'leaving it alone is not a match for eight to one');
   assert.match(idle.cells[1].text, /too gentle$/);
@@ -236,7 +236,7 @@ test('a compressor doing nothing does not pass for one that is working', () => {
 test('the sidechain exercise knows an un-keyed compressor when it sees one', () => {
   const answer = { depth: 8, recovery: 250 };
   const puzzle = { settings: { exercise: 'duck' }, answer };
-  const score = compression.score({ ...COMP_DEFAULTS, threshold: -20, ratio: 4 }, answer, 'medium', puzzle);
+  const score = compression.score({ ...COMP_DEFAULTS, threshold: -20, ratio: 4 }, { ...puzzle, tier: 'medium' });
   assert.ok(!score.correct, 'a compressor listening to itself is not a duck');
 });
 
@@ -287,7 +287,7 @@ test('nothing a compressor reading says gets read as a chord symbol', () => {
       { ...COMP_DEFAULTS, threshold: -55, ratio: 20, attack: 0.5, release: 40 },
       { ...COMP_DEFAULTS, sidechain: true, threshold: -24, ratio: 6, release: 600 }]) {
       for (const tier of ['easy', 'medium', 'hard']) {
-        for (const cell of compression.score(guess, puzzle.answer, tier, puzzle).cells) {
+        for (const cell of compression.score(guess, { ...puzzle, tier: tier }).cells) {
           said.push([exercise, cell.text]);
         }
       }

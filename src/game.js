@@ -1,7 +1,7 @@
-import { modeOf } from './modes/index.js';
+import { toolOf } from './bench/registry.js';
 import { mulberry32, hashSeed, dayKey, puzzleNumber } from './random.js';
 
-export { HIT, NEAR, MISS } from './modes/scoring.js';
+export { HIT, NEAR, MISS } from './work/scoring.js';
 
 /**
  * Read a guess against the answer, through the mode that asked the question.
@@ -12,13 +12,18 @@ export { HIT, NEAR, MISS } from './modes/scoring.js';
  * audio, and the audio is on the puzzle.
  */
 export function scoreGuess(guess, puzzle) {
-  return modeOf(puzzle.mode).score(guess, puzzle.answer, puzzle.tier, puzzle);
+  // Two arguments where there were four. The answer and the tier both live on
+  // the puzzle already, and every scorer had grown a defensive
+  // `puzzle?.settings?.exercise ?? '…'` to find the third thing it needed -
+  // so three of the four were being passed twice, and the fourth was the one
+  // that mattered.
+  return toolOf(puzzle.mode).score(guess, puzzle);
 }
 
 /** Whatever the mode's settings are set to, filled in from their defaults. */
 export function settingsFor(mode, chosen = {}) {
   return Object.fromEntries(
-    (modeOf(mode).settings ?? []).map((setting) => [
+    (toolOf(mode).settings ?? []).map((setting) => [
       setting.id,
       setting.options.some((option) => option.id === chosen[setting.id])
         ? chosen[setting.id]
@@ -38,7 +43,7 @@ export function makePuzzle({ mode = 'eq', tier = 'easy', settings = {}, seed }) 
   const rng = mulberry32(hashSeed(seed));
   const chosen = settingsFor(mode, settings);
 
-  return { mode, tier, settings: chosen, seed, ...modeOf(mode).makePuzzle(rng, tier, chosen) };
+  return { mode, tier, settings: chosen, seed, ...toolOf(mode).makePuzzle(rng, tier, chosen) };
 }
 
 /**
@@ -102,7 +107,7 @@ export function sameGuess(a, b) {
 /** What the controls start on, before anything has been dialled. */
 export function startingGuess(mode, tier) {
   return Object.fromEntries(
-    modeOf(mode).slots(tier).filter((slot) => slot.kind === 'range')
+    toolOf(mode).slots(tier).filter((slot) => slot.kind === 'range')
       .map((slot) => [slot.id, slot.start]),
   );
 }
@@ -135,17 +140,13 @@ export function submitGuess(game, guess) {
  * where. Anything more specific than that is the reveal, which is its own
  * button and says so.
  */
+const ladderFor = (game) => toolOf(game.puzzle.mode).hints?.(game.puzzle) ?? [];
+
 export function hintFor(game) {
-  const ladder = modeOf(game.puzzle.mode).hints?.(
-    game.puzzle.answer, game.puzzle.tier, game.puzzle) ?? [];
-  return ladder[game.hinted] ?? null;
+  return ladderFor(game)[game.hinted] ?? null;
 }
 
-export const hintsLeft = (game) => {
-  const ladder = modeOf(game.puzzle.mode).hints?.(
-    game.puzzle.answer, game.puzzle.tier, game.puzzle) ?? [];
-  return Math.max(0, ladder.length - game.hinted);
-};
+export const hintsLeft = (game) => Math.max(0, ladderFor(game).length - game.hinted);
 
 export const takeHint = (game) => ({ ...game, hinted: game.hinted + 1, error: null });
 
@@ -157,5 +158,5 @@ export function showAnswer(game) {
 
 /** What the answer was, for the reveal line. */
 export function reveal(puzzle) {
-  return modeOf(puzzle.mode).reveal(puzzle.answer, puzzle.tier, puzzle);
+  return toolOf(puzzle.mode).reveal(puzzle);
 }

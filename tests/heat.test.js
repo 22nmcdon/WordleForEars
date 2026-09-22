@@ -8,7 +8,7 @@ import {
 import { fft } from '../src/fx/fft.js';
 import { saturatorSource } from '../src/heat/node.js';
 import { mulberry32 } from '../src/random.js';
-import saturation from '../src/modes/saturation.js';
+import { HEAT_WORK as saturation } from '../src/work/saturation.js';
 
 const rate = 48000;
 
@@ -244,7 +244,7 @@ test('leaving the plugin alone is never the answer', () => {
     for (const tier of Object.keys(saturation.tiers)) {
       for (let i = 0; i < 12; i += 1) {
         const puzzle = round(exercise, tier, 0x5a7 + i * 7919);
-        const result = saturation.score({ ...HEAT_DEFAULTS }, puzzle.answer, tier, puzzle);
+        const result = saturation.score({ ...HEAT_DEFAULTS }, { ...puzzle, tier: tier });
         assert.equal(result.correct, false, `${exercise}/${tier} was won by doing nothing`);
       }
     }
@@ -255,14 +255,14 @@ test('matching is marked on the harmonics, not on the knobs', () => {
   for (const tier of Object.keys(saturation.tiers)) {
     for (let i = 0; i < 12; i += 1) {
       const puzzle = round('match', tier, 0x5a7 + i * 7919);
-      const exact = saturation.score(puzzle.answer, puzzle.answer, tier, puzzle);
+      const exact = saturation.score(puzzle.answer, { ...puzzle, tier: tier });
       assert.equal(exact.correct, true, `${tier} rejected its own answer`);
 
       // The same series by another route is the same answer: turning the
       // trim, and monitoring the difference, change nothing about what the
       // curve makes.
       const elsewhere = { ...puzzle.answer, trim: -6, listen: 'diff' };
-      assert.equal(saturation.score(elsewhere, puzzle.answer, tier, puzzle).correct, true);
+      assert.equal(saturation.score(elsewhere, { ...puzzle, tier: tier }).correct, true);
     }
   }
 });
@@ -275,13 +275,13 @@ test('warmth without grit cannot be had by driving it harder', () => {
       // Slammed and lopsided: plenty of even harmonics, and a pile of odd
       // ones underneath them.
       const slammed = saturation.score(
-        { ...HEAT_DEFAULTS, drive: 26, bias: 1, hardness: 4 }, null, tier, puzzle);
+        { ...HEAT_DEFAULTS, drive: 26, bias: 1, hardness: 4 }, { ...puzzle, tier: tier });
       assert.equal(slammed.correct, false, `${tier} accepted a slammed guess`);
 
       // And there is a way through: gently, with the bias doing the work.
       const found = [2, 4, 6, 8, 10, 12, 14].flatMap((drive) =>
         [0.4, 0.6, 0.85, 1].map((bias) => ({ ...HEAT_DEFAULTS, drive, bias, hardness: 2, tone: 2000, mix: 0.6 })))
-        .some((guess) => saturation.score(guess, null, tier, puzzle).correct);
+        .some((guess) => saturation.score(guess, { ...puzzle, tier: tier }).correct);
       assert.ok(found, `${tier} asked for ${puzzle.want} dB of even harmonics and nothing reaches it`);
     }
   }

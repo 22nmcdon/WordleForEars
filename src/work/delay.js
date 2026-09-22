@@ -2,7 +2,6 @@ import {
   ECHO_DEFAULTS, DIVISIONS, SYNC_DIVISIONS, MOST_FEEDBACK,
   echoProfile, timeOf, nearestDivision,
 } from '../echo/line.js';
-import { EchoPlugin } from '../echo/plugin.js';
 import { decayReading } from '../fx/response.js';
 import { distance } from '../gap.js';
 import { writeMs } from '../fx/panel.js';
@@ -25,10 +24,6 @@ import { HIT, NEAR, MISS, logPick, toStep, pick } from './scoring.js';
  */
 
 /** What each exercise is played on, and what the other side of the A/B is. */
-const ECHO_EXERCISES = {
-  match: { source: 'instrument', other: 'Target', tempo: true },
-  find: { source: 'drums', other: 'Dry', tempo: false },
-};
 
 /**
  * How far two delays may be apart and still match, in decibels of decay.
@@ -50,45 +45,45 @@ const ECHO_CLOSE = { easy: 2.6, medium: 1.9, hard: 1.2 };
  */
 const LOCKED = { easy: 0.16, medium: 0.1, hard: 0.06 };
 
-export default {
-  id: 'delay',
-  label: 'Delay',
-  blurb: 'Lock the repeats',
-  surface: true,
-  lede: 'A delay, and a loop running through it. Build the same one you can '
-      + 'hear on the target — or find the time by ear, with nothing telling '
-      + 'you the tempo.',
-  opening: 'Play the loop, set the repeats, then lock it in.',
-  advice: 'A delay is right when the repeats fall in with the track and wrong when they walk through it. That is the thing to listen for, and it is easier to hear on drums than on anything else.',
+/**
+ * The two exercises, in the shape a session can set up.
+ *
+ * In match there is a delay on the other side of the A/B. In find there is
+ * nothing there: what you compare against is the loop with no repeats on it,
+ * which is what tells you whether yours is falling in with it.
+ */
+export const ECHO_EXERCISES = {
+  match: {
+    id: 'match',
+    label: 'Match the delay',
+    source: 'instrument',
+    sourceOptions: { tempo: true },
+    other: 'Target',
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  find: {
+    id: 'find',
+    label: 'Find the time',
+    source: 'drums',
+    sourceOptions: { tempo: false },
+    other: 'Dry',
+    targetOf: (puzzle) => ({ ...ECHO_DEFAULTS, ...puzzle.answer }),
+  },
+};
 
-  help: [
-    ['Play the loop, then set the repeats.',
-     'The left panel is the repeats against one bar of the track: left goes up, right '
-     + 'goes down, so a ping-pong reads as repeats stepping from one side to the other. '
-     + 'The right panel is how the whole thing dies away.'],
-    ['Finding the time is the point.',
-     'In that exercise there is no tempo readout and no grid, because matching a delay '
-     + 'to a record nobody has told you the tempo of is the real version of the job. '
-     + 'Listen for the repeats falling in with the track rather than walking through it.'],
-    ['The filters are inside the loop.',
-     'Tone and low cut are applied to each repeat on its way round again, so they do not '
-     + 'darken the delay once - they darken it a little more every time. That is what '
-     + 'keeps a long feedback from turning into mud.'],
-    ['You are judged on what comes out, not on the knobs.',
-     'Two delays that die away the same way are the same delay. Auto gain is on, so more '
-     + 'feedback is more repeats rather than more level.'],
-  ],
+export const ECHO_WORK = {
+  tool: 'delay',
+  opening: 'Play the loop, set the repeats, then lock it in.',
 
   settings: [
     {
       id: 'exercise',
       label: 'Exercise',
-      options: [
-        { id: 'match', label: 'Match the delay' },
-        { id: 'find', label: 'Find the time' },
-      ],
+      options: Object.values(ECHO_EXERCISES).map(({ id, label }) => ({ id, label })),
     },
   ],
+
+  exercises: ECHO_EXERCISES,
 
   tiers: {
     easy: { label: 'Easy', blurb: 'Time and feedback', guesses: 4, tone: false, detail: false },
@@ -143,7 +138,9 @@ export default {
 
   /* ---------- marking ---------- */
 
-  score(guess, answer, tier, puzzle) {
+  score(state, puzzle) {
+    const { answer, tier } = puzzle;
+    const guess = state;
     const exercise = puzzle?.settings?.exercise ?? 'match';
     const settings = { ...ECHO_DEFAULTS, ...guess };
     // Delays are built from numbers rather than recorded, so marking needs no
@@ -162,7 +159,7 @@ export default {
     const error = gap.off;
 
     const close = ECHO_CLOSE[tier];
-    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
+    const mark = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
     // Which way it is out, in the terms the delay is set in.
     const timing = Math.log2(settings.time / wanted.time);
@@ -172,9 +169,9 @@ export default {
       correct: error <= close,
       error,
       cells: [
-        { state, text: `${error.toFixed(1)} dB out` },
+        { state: mark, text: `${error.toFixed(1)} dB out` },
         {
-          state,
+          state: mark,
           text: error <= close ? 'that is the delay'
             : Math.abs(timing) > 0.06 ? `${this.howFar(timing)} too ${timing > 0 ? 'long' : 'short'}`
             : Math.abs(back) > 0.1 ? `${Math.round(Math.abs(back) * 100)}% too much ${back > 0 ? 'feedback' : 'little feedback'}`
@@ -267,47 +264,8 @@ export default {
     return `${Math.round((factor - 1) * 100)}%`;
   },
 
-  /* ---------- the surface ---------- */
-
-  mount(el, { engine, puzzle, onChange }) {
-    const exercise = puzzle.settings.exercise;
-    const spec = ECHO_EXERCISES[exercise];
-    const settings = { ...ECHO_DEFAULTS };
-
-    const plugin = new EchoPlugin(el, {
-      engine, settings, onChange, source: spec.source, tempo: spec.tempo,
-    });
-
-    plugin.nameOther(spec.other);
-    // In match there is a delay on the other side of the A/B. In find there
-    // is nothing there: what you compare against is the loop with no repeats
-    // on it, which is what tells you whether yours is falling in with it.
-    plugin.setTarget(exercise === 'match'
-      ? puzzle.answer
-      : { ...ECHO_DEFAULTS, ...puzzle.answer });
-
-    return {
-      guess: () => ({ ...settings }),
-      reveal: ({ live = false } = {}) => {
-        plugin.showTarget({ ...ECHO_DEFAULTS, ...puzzle.answer });
-        if (!live) plugin.lock();
-      },
-      unlock: () => plugin.unlock(),
-      toggle: () => plugin.toggle(),
-      destroy: () => plugin.destroy(),
-    };
-  },
-
-  clues() {
-    return [];
-  },
-
-  play() {
-    // The loop runs inside the plugin, under the player's own hands.
-  },
-
-  /** The way out, in two rungs, worked out from the answer. */
-  hints(answer, tier, puzzle) {
+  hints(puzzle) {
+    const { answer, tier } = puzzle;
     const settings = { ...ECHO_DEFAULTS, ...answer };
 
     if ((puzzle?.settings?.exercise ?? 'match') === 'find') {
@@ -333,7 +291,8 @@ export default {
     ];
   },
 
-  reveal(answer, tier, puzzle) {
+  reveal(puzzle) {
+    const { answer } = puzzle;
     const settings = { ...ECHO_DEFAULTS, ...answer };
 
     if ((puzzle?.settings?.exercise ?? 'match') === 'find') {
@@ -348,7 +307,8 @@ export default {
     };
   },
 
-  weak(answer, puzzle) {
+  weak(puzzle) {
+    const { answer } = puzzle;
     if ((puzzle?.settings?.exercise ?? 'match') === 'find') {
       return { key: answer.division, label: `the ${answer.division} delay` };
     }

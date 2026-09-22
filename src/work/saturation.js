@@ -2,7 +2,6 @@ import {
   HEAT_DEFAULTS, HEAT_FLOOR, MOST_TONE, MOST_HARDNESS,
   harmonicsReading,
 } from '../heat/shape.js';
-import { HeatPlugin } from '../heat/plugin.js';
 import { distance } from '../gap.js';
 import { HIT, NEAR, MISS, toStep } from './scoring.js';
 
@@ -30,11 +29,6 @@ import { HIT, NEAR, MISS, toStep } from './scoring.js';
  * answer, whatever route they took.
  */
 
-const HEAT_EXERCISES = {
-  amount: { source: 'instrument', other: 'Target' },
-  match: { source: 'mix', other: 'Target' },
-  even: { source: 'instrument', other: 'Untouched' },
-};
 
 /** How far off the amount of saturation may be, in decibels of distortion. */
 const AMOUNT_CLOSE = { easy: 2.6, medium: 1.6, hard: 1.0 };
@@ -49,46 +43,53 @@ const EVEN_LEAD = { easy: 3, medium: 5, hard: 7 };
 const writeEven = (db) => `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`;
 
 
-export default {
-  id: 'saturation',
-  label: 'Saturation',
-  blurb: 'Even, odd, and how much',
-  surface: true,
-  lede: 'A saturator, and a loop running through it. Match how much colour '
-      + 'the target has, match the colour itself, or build a warmth that is '
-      + 'all even harmonics and no grit.',
-  opening: 'Play the loop, drive it, then lock it in.',
-  advice: 'Auto gain is on, and leave it on — saturation makes things louder as well as richer, and louder always sounds better for about two seconds. Press “Only the heat” to hear what the curve is adding with nothing else in the way.',
+/**
+ * The three exercises, in the shape a session can set up.
+ *
+ * In "even, not odd" there is nothing on the other side of the A/B but the
+ * loop clean, because the question is how much warmth you have added rather
+ * than how close you are to somebody else's.
+ */
+export const HEAT_EXERCISES = {
+  amount: {
+    id: 'amount',
+    label: 'How much',
+    source: 'mix',
+    other: 'Target',
+    faultOf: () => null,
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  match: {
+    id: 'match',
+    label: 'Match the colour',
+    source: 'mix',
+    other: 'Target',
+    faultOf: () => null,
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  even: {
+    id: 'even',
+    label: 'Even, not odd',
+    source: 'instrument',
+    other: 'Clean',
+    faultOf: () => null,
+    targetOf: () => ({ ...HEAT_DEFAULTS }),
+  },
+};
 
-  help: [
-    ['Play the loop, then drive it.',
-     'The square panel is the transfer curve: what comes out for everything that could '
-     + 'go in. A straight line does nothing. A line that bends at the ends is saturating, '
-     + 'and how sharply it bends is the Hardness.'],
-    ['Bias is the one that matters.',
-     'A curve that treats up and down alike can only make odd harmonics — the third, the '
-     + 'fifth — and those sound like grit. Tilt it with Bias and the even ones appear, and '
-     + 'those sound like the note getting bigger. Gold bars are even, pink are odd.'],
-    ['Drive decides how much, not which.',
-     'Past a certain point everything sounds the same kind of broken: hit anything hard '
-     + 'enough and it becomes a square wave, which is all odd. Warmth lives at the quiet '
-     + 'end of the drive, with the bias doing the work.'],
-    ['You are judged on the harmonics, not the knobs.',
-     'The series a sine comes out as, second to tenth. Two sets of settings that make the '
-     + 'same series are the same answer.'],
-  ],
+export const HEAT_WORK = {
+  tool: 'saturation',
+  opening: 'Play the loop, drive it, then lock it in.',
 
   settings: [
     {
       id: 'exercise',
       label: 'Exercise',
-      options: [
-        { id: 'amount', label: 'How much' },
-        { id: 'match', label: 'Match the colour' },
-        { id: 'even', label: 'Even, not odd' },
-      ],
+      options: Object.values(HEAT_EXERCISES).map(({ id, label }) => ({ id, label })),
     },
   ],
+
+  exercises: HEAT_EXERCISES,
 
   tiers: {
     easy: { label: 'Easy', blurb: 'Drive and bias', guesses: 3, knobs: 2 },
@@ -165,7 +166,9 @@ export default {
 
   /* ---------- marking ---------- */
 
-  score(guess, answer, tier, puzzle) {
+  score(state, puzzle) {
+    const { answer, tier } = puzzle;
+    const guess = state;
     const exercise = puzzle?.settings?.exercise ?? 'amount';
     const rate = puzzle?.rate ?? 48000;
     // Readings, not raw series: the same envelope the plugin hands back, so
@@ -184,15 +187,15 @@ export default {
   scoreAmount(mine, theirs, tier) {
     const off = Math.abs(mine.thd - theirs.thd);
     const close = AMOUNT_CLOSE[tier];
-    const state = off <= close ? HIT : off <= close * 2.5 ? NEAR : MISS;
+    const mark = off <= close ? HIT : off <= close * 2.5 ? NEAR : MISS;
 
     return {
       correct: off <= close,
       error: off,
       cells: [
-        { state, text: `${mine.thd.toFixed(1)} dB of harmonics` },
+        { state: mark, text: `${mine.thd.toFixed(1)} dB of harmonics` },
         {
-          state,
+          state: mark,
           text: off <= close ? 'that is the amount'
             : `${off.toFixed(1)} dB ${mine.thd > theirs.thd ? 'too dirty' : 'too clean'}`,
           narrow: true,
@@ -231,15 +234,15 @@ export default {
     const theirs = theirsRead.values;
     const gap = distance(mineRead, theirsRead);
     const close = COLOUR_CLOSE[tier];
-    const state = gap.off <= close ? HIT : gap.off <= close * 2 ? NEAR : MISS;
+    const mark = gap.off <= close ? HIT : gap.off <= close * 2 ? NEAR : MISS;
 
     return {
       correct: gap.off <= close,
       error: gap.off,
       cells: [
-        { state, text: `${gap.off.toFixed(1)} dB out` },
+        { state: mark, text: `${gap.off.toFixed(1)} dB out` },
         {
-          state,
+          state: mark,
           // Which harmonic is worst, because that is what is being read: an
           // average over nine of them says nothing when one is in completely
           // the wrong place and the other eight are right.
@@ -343,43 +346,8 @@ export default {
     };
   },
 
-  /* ---------- the surface ---------- */
-
-  mount(el, { engine, puzzle, onChange }) {
-    const exercise = puzzle.settings.exercise;
-    const spec = HEAT_EXERCISES[exercise];
-    const settings = { ...HEAT_DEFAULTS };
-
-    const plugin = new HeatPlugin(el, {
-      engine, settings, onChange, source: spec.source,
-    });
-
-    plugin.nameOther(spec.other);
-    plugin.setTarget(exercise === 'even' ? { ...HEAT_DEFAULTS } : puzzle.answer);
-    puzzle.rate = engine?.ctx?.sampleRate ?? 48000;
-
-    return {
-      guess: () => ({ ...settings }),
-      reveal: ({ live = false } = {}) => {
-        if (puzzle.answer) plugin.showTarget({ ...HEAT_DEFAULTS, ...puzzle.answer });
-        if (!live) plugin.lock();
-      },
-      unlock: () => plugin.unlock(),
-      toggle: () => plugin.toggle(),
-      destroy: () => plugin.destroy(),
-    };
-  },
-
-  clues() {
-    return [];
-  },
-
-  play() {
-    // The loop runs inside the plugin, under the player's own hands.
-  },
-
-  /** The way out, in two rungs, worked out from the answer. */
-  hints(answer, tier, puzzle) {
+  hints(puzzle) {
+    const { answer, tier } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'amount';
 
     if (exercise === 'even') {
@@ -414,7 +382,8 @@ export default {
     ];
   },
 
-  reveal(answer, tier, puzzle) {
+  reveal(puzzle) {
+    const { answer } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'amount';
 
     if (exercise === 'even') {
@@ -437,7 +406,8 @@ export default {
     return { symbol: parts.join(' · '), name: '' };
   },
 
-  weak(answer, puzzle) {
+  weak(puzzle) {
+    const { answer } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'amount';
     if (exercise === 'even') return { key: 'even', label: 'even harmonics' };
     if (exercise === 'match') return { key: 'colour', label: 'harmonic colour' };

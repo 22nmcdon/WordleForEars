@@ -1,7 +1,6 @@
 import {
   IMAGE_DEFAULTS, imageOf, imageReading, runImager,
 } from '../image/field.js';
-import { ImagePlugin } from '../image/plugin.js';
 import { makeBiquad, setBiquad, runBiquad } from '../comp/dsp.js';
 import { mulberry32 } from '../random.js';
 import { distance } from '../gap.js';
@@ -26,11 +25,6 @@ import { HIT, NEAR, MISS, toStep, pick } from './scoring.js';
  * this mode.
  */
 
-const IMAGE_EXERCISES = {
-  place: { source: 'instrument', other: 'Target', fault: null },
-  match: { source: 'mix', other: 'Target', fault: null },
-  mono: { source: 'mix', other: 'Untreated', fault: { low: 2.3 } },
-};
 
 /** How far two images may be apart, in decibels of width, and still match. */
 const IMAGE_CLOSE = { easy: 2.4, medium: 1.6, hard: 1.0 };
@@ -119,46 +113,55 @@ const writePan = (pan) => {
 const mean = (list) => list.reduce((a, b) => a + b, 0) / Math.max(1, list.length);
 const held = (db) => Math.max(-MOST_BALANCE, Math.min(MOST_BALANCE, db));
 
-export default {
-  id: 'panning',
-  label: 'Stereo',
-  blurb: 'Place it, and size it',
-  surface: true,
-  lede: 'A stereo imager, and a loop running through it. Put the sound where '
-      + 'the target sits, build the same width the target has, or rescue a low '
-      + 'end that somebody has spread so wide it disappears in mono.',
-  opening: 'Play the loop, work the image, then lock it in.',
-  advice: 'Headphones for this one — a laptop speaker has almost no stereo field to point at. And press Mono often: it is the check that decides what everybody else hears.',
+/**
+ * The three exercises, in the shape a session can set up.
+ *
+ * The descriptor that used to be spelled out inside `mount`, as data - which
+ * is what lets one tool be handed from one exercise to the next without being
+ * destroyed in between.
+ */
+export const IMAGE_EXERCISES = {
+  place: {
+    id: 'place',
+    label: 'Place it',
+    source: 'instrument',
+    other: 'Target',
+    faultOf: () => null,
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  match: {
+    id: 'match',
+    label: 'Match the image',
+    source: 'mix',
+    other: 'Target',
+    faultOf: () => null,
+    targetOf: (puzzle) => puzzle.answer,
+  },
+  mono: {
+    id: 'mono',
+    label: 'Rescue the low end',
+    source: 'mix',
+    // Somebody spread the bottom end before it reached you. The other side of
+    // the A/B is that, untouched, so you can hear what you are undoing.
+    other: 'Untreated',
+    faultOf: (puzzle) => puzzle.fault ?? { low: 2.3 },
+    targetOf: () => ({ ...IMAGE_DEFAULTS }),
+  },
+};
 
-  help: [
-    ['Play the loop, then work the image.',
-     'The round display is the two channels drawn against each other. Straight up and '
-     + 'down is mono, a cloud is wide, and anything lying over towards the horizontal is '
-     + 'two channels arguing — which is exactly what will not survive being summed.'],
-    ['Width is one idea applied three times.',
-     'A pair of channels is the same information as a middle and a side, and width is '
-     + 'what the side gets multiplied by. Doing it per band is the whole point: a low end '
-     + 'wants to be narrow and a top end usually does not.'],
-    ['Mono is the check that matters.',
-     'Most of what a record is played on sums to mono somewhere. The bars go red when the '
-     + 'two channels of a band are arguing, and the readout says what a fold to mono is '
-     + 'costing you.'],
-    ['You are judged on the image, not the knobs.',
-     'Width band by band, and where the whole thing is sitting left to right. Two sets of '
-     + 'settings that come out the same width are the same answer.'],
-  ],
+export const IMAGE_WORK = {
+  tool: 'panning',
+  opening: 'Play the loop, work the image, then lock it in.',
 
   settings: [
     {
       id: 'exercise',
       label: 'Exercise',
-      options: [
-        { id: 'place', label: 'Place it' },
-        { id: 'match', label: 'Match the image' },
-        { id: 'mono', label: 'Rescue the low end' },
-      ],
+      options: Object.values(IMAGE_EXERCISES).map(({ id, label }) => ({ id, label })),
     },
   ],
+
+  exercises: IMAGE_EXERCISES,
 
   tiers: {
     easy: { label: 'Easy', blurb: 'Hard left, centre, hard right', guesses: 3, places: [-1, 0, 1], bands: 1 },
@@ -203,7 +206,9 @@ export default {
 
   /* ---------- marking ---------- */
 
-  score(guess, answer, tier, puzzle) {
+  score(state, puzzle) {
+    const { answer, tier } = puzzle;
+    const guess = state;
     const exercise = puzzle?.settings?.exercise ?? 'place';
     const settings = { ...IMAGE_DEFAULTS, ...guess, listen: 'stereo' };
     const material = fieldMaterial(puzzle);
@@ -231,15 +236,15 @@ export default {
     const off = Math.abs(got - wanted);
 
     const close = PLACED[tier];
-    const state = off <= close ? HIT : off <= close * 2.5 ? NEAR : MISS;
+    const mark = off <= close ? HIT : off <= close * 2.5 ? NEAR : MISS;
 
     return {
       correct: off <= close,
       error: off,
       cells: [
-        { state, text: writePan(this.panOf(got)) },
+        { state: mark, text: writePan(this.panOf(got)) },
         {
-          state,
+          state: mark,
           text: off <= close ? 'that is where it is'
             : `${off.toFixed(1)} dB too far ${got > wanted ? 'left' : 'right'}`,
           narrow: true,
@@ -311,15 +316,15 @@ export default {
     const error = gap.off;
 
     const close = IMAGE_CLOSE[tier];
-    const state = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
+    const mark = error <= close ? HIT : error <= close * 2.5 ? NEAR : MISS;
 
     return {
       correct: error <= close,
       error,
       cells: [
-        { state, text: `${error.toFixed(1)} dB out` },
+        { state: mark, text: `${error.toFixed(1)} dB out` },
         {
-          state,
+          state: mark,
           // Where the worst of it is, because that is what is being read: a
           // whole-mix reading would say nothing when one band is in
           // completely the wrong place and the other five are right.
@@ -425,54 +430,8 @@ export default {
     };
   },
 
-  /* ---------- the surface ---------- */
-
-  mount(el, { engine, puzzle, onChange }) {
-    const exercise = puzzle.settings.exercise;
-    const spec = IMAGE_EXERCISES[exercise];
-    const settings = { ...IMAGE_DEFAULTS };
-
-    const plugin = new ImagePlugin(el, {
-      engine, settings, onChange, source: spec.source, fault: puzzle.fault ?? spec.fault,
-    });
-
-    plugin.nameOther(spec.other);
-    plugin.setTarget(exercise === 'mono' ? { ...IMAGE_DEFAULTS } : puzzle.answer);
-
-    // The loop a guess is read against, kept on the puzzle. The sample picker
-    // changes what you monitor and never what you are marked on.
-    (async () => {
-      try {
-        await plugin.player.prepare();
-        const sample = plugin.player.sample();
-        if (sample) puzzle.material = sample;
-      } catch {
-        // No audio yet; scoring says so rather than guessing.
-      }
-    })();
-
-    return {
-      guess: () => ({ ...settings }),
-      reveal: ({ live = false } = {}) => {
-        if (puzzle.answer) plugin.showTarget({ ...IMAGE_DEFAULTS, ...puzzle.answer });
-        if (!live) plugin.lock();
-      },
-      unlock: () => plugin.unlock(),
-      toggle: () => plugin.toggle(),
-      destroy: () => plugin.destroy(),
-    };
-  },
-
-  clues() {
-    return [];
-  },
-
-  play() {
-    // The loop runs inside the plugin, under the player's own hands.
-  },
-
-  /** The way out, in two rungs, worked out from the answer. */
-  hints(answer, tier, puzzle) {
+  hints(puzzle) {
+    const { answer, tier } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'place';
 
     if (exercise === 'mono') {
@@ -516,7 +475,8 @@ export default {
     ];
   },
 
-  reveal(answer, tier, puzzle) {
+  reveal(puzzle) {
+    const { answer } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'place';
 
     if (exercise === 'mono') {
@@ -537,7 +497,8 @@ export default {
     return { symbol: writePan(answer.pan), name: '' };
   },
 
-  weak(answer, puzzle) {
+  weak(puzzle) {
+    const { answer } = puzzle;
     const exercise = puzzle?.settings?.exercise ?? 'place';
     if (exercise === 'mono') return { key: 'mono', label: 'mono compatibility' };
     if (exercise === 'match') return { key: 'width', label: 'width' };

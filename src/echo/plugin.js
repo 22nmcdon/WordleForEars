@@ -212,12 +212,10 @@ export class EchoPlugin {
       }
     });
 
-    this.el.querySelector('#echoSource').addEventListener('change', async (e) => {
-      this.player.source = e.target.value;
-      await this.reload();
-    });
-
-    this.el.querySelector('#echoFile').addEventListener('change', (e) => this.open(e));
+    this.el.querySelector('#echoSource')
+      .addEventListener('change', (e) => this.setSource(e.target.value));
+    this.el.querySelector('#echoFile')
+      .addEventListener('change', (e) => this.loadFile(e.target.files?.[0]));
 
     this.resize = () => { this.restage(); this.draw(); };
     window.addEventListener('resize', this.resize);
@@ -226,8 +224,14 @@ export class EchoPlugin {
   /** Whatever the sample picker is now set to, rebuilt from the start. */
   async reload() {
     this.player.buffer = null;
-    await this.player.prepare();
-    this.player.mine.made = null;
+    await this.player.prepare().catch(() => {});
+
+    // Both sides may not exist yet. The repeats are rendered into the
+    // material rather than filtered over it, so the two chains are built the
+    // first time anything plays - and this is now called at attach, which is
+    // before that. It used to be reached only from a change handler, which by
+    // definition only ran once somebody had already been working.
+    if (this.player.mine) this.player.mine.made = null;
     if (this.player.theirs) this.player.theirs.made = null;
     await this.player.setSettings(this.settings);
     if (this.player.target) await this.player.setTarget(this.player.target);
@@ -235,26 +239,6 @@ export class EchoPlugin {
     this.draw();
   }
 
-  async open(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const yours = this.el.querySelector('#echoYours');
-    yours.hidden = false;
-    yours.textContent = 'reading…';
-
-    try {
-      const buffer = await this.player.load(file);
-      this.el.querySelector('#echoSource').value = 'yours';
-      this.player.source = 'yours';
-      await this.reload();
-      await this.player.play();
-      this.playing(true);
-      yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
-    } catch {
-      yours.textContent = 'that file could not be read';
-    }
-  }
 
   setSync(id) {
     const select = this.el.querySelector('#echoSync');
@@ -366,6 +350,11 @@ export class EchoPlugin {
   }
 
   draw() {
+    // A plugin that has been taken off the sheet stops drawing. Its setters
+    // are async - rendering a loop takes a second - so their promises can
+    // land after it has been torn down, and writing to elements that are no
+    // longer in the page is how a clean handover throws.
+    if (this.gone) return;
     const ink = echoPalette(this.el);
     this.drawTaps(ink);
     this.drawDecay(ink);
@@ -509,7 +498,15 @@ export class EchoPlugin {
     await this.player.setTarget(target);
   }
 
+  /** Draw the answer over yours, or take it back off. */
   showTarget(target) {
+    if (!target) {
+      this.target = null;
+      this.targetProfile = null;
+      this.draw();
+      return;
+    }
+
     const rate = this.engine.ctx?.sampleRate ?? 48000;
     this.target = target;
     const theirs = makeEcho(rate, target);
@@ -518,8 +515,85 @@ export class EchoPlugin {
     this.draw();
   }
 
+  /**
+   * What the monitor is set to.
+   *
+   * A getter, and new. Restoring a tool to what it was doing means knowing
+   * what it was doing, and nothing could say. Note that it is not `playing`:
+   * that one is a setter on all six, so asking it a question answers by
+   * turning the sound off.
+   */
+  source() {
+    return this.player.source ?? null;
+  }
+
+  /** What the other side of the A/B is currently called. */
+  abLabel() {
+    return this.el.querySelector('#echoOther')?.textContent ?? null;
+  }
+
+  /** The other side of the A/B, named for what it actually is. */
+  nameAB(label) {
+    const slot = this.el.querySelector('#echoOther');
+    if (slot) slot.textContent = label;
+  }
+
   nameOther(label) {
-    this.el.querySelector('#echoOther').textContent = label;
+    const slot = this.el.querySelector('#echoOther');
+    if (slot) slot.textContent = label;
+  }
+
+  /* ---------- the lifecycle ---------- */
+
+  /**
+   * Put the controls somewhere, without a round having to be started for it.
+   *
+   * New, and it is the piece the whole inversion turns on. Until now a tool
+   * was mounted by an exercise and torn down when the exercise changed, so
+   * "what is this set to" only ever had one answer per lifetime. A workbench
+   * needs the other direction: the tool is the thing that stays, and an
+   * exercise is something that arrives, sets it up, and leaves it as it found
+   * it.
+   */
+  setState(next) {
+    Object.assign(this.settings, next);
+    this.buildKnobs();
+    this.changed();
+  }
+
+  /** Change what is running through it. */
+  async setSource(id) {
+    this.player.source = id;
+    const picker = this.el.querySelector('#echoSource');
+    if (picker) picker.value = id;
+    await this.reload();
+  }
+
+  /** Nothing is done to a delay's material before it reaches you. */
+  async setFault() {}
+
+  /** What is on the other side of the A/B, or nothing. */
+  async setTarget(target) {
+    await this.player.setTarget(target ?? null);
+  }
+
+  /** Something the player brought themselves. */
+  async loadFile(file) {
+    if (!file) return false;
+
+    const yours = this.el.querySelector('#echoYours');
+    if (yours) { yours.hidden = false; yours.textContent = 'reading…'; }
+
+    try {
+      const buffer = await this.player.load(file);
+      await this.setSource('yours');
+      if (!this.player.playing) { await this.player.play(); this.playing(true); }
+      if (yours) yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
+      return true;
+    } catch {
+      if (yours) yours.textContent = 'that file could not be read';
+      return false;
+    }
   }
 
   /* ---------- what this is a reading of ---------- */
@@ -580,6 +654,7 @@ export class EchoPlugin {
   }
 
   destroy() {
+    this.gone = true;
     cancelAnimationFrame(this.frame);
     window.removeEventListener('resize', this.resize);
     this.player.destroy();

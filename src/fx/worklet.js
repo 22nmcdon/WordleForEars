@@ -34,11 +34,28 @@ ${parts.map((part) => part.toString()).join('\n\n')}
 ${processor}`;
 }
 
-/** Loads a worklet into a context once, and remembers whether it took. */
+/**
+ * Loads a worklet into a context once, and remembers whether it took.
+ *
+ * Keyed by the context AND the module, which it was not. A WeakMap on the
+ * context alone meant the first processor installed into a context won and
+ * every later one silently was not added at all - `addModule` was never
+ * called for it, and the cached `true` from the first said everything was
+ * fine. Constructing the node then threw "the node name is not defined in
+ * AudioWorkletGlobalScope", from the one place that reads as a browser
+ * problem rather than as a cache.
+ *
+ * It was invisible for as long as a tool was torn down when you left it: you
+ * heard whichever of the three worklet processors you opened first, and the
+ * other two fell back to the main-thread path or failed outright. Three
+ * tools, one slot.
+ */
 const loaded = new WeakMap();
 
 export function installWorklet(ctx, source) {
-  if (loaded.has(ctx)) return loaded.get(ctx);
+  if (!loaded.has(ctx)) loaded.set(ctx, new Map());
+  const perContext = loaded.get(ctx);
+  if (perContext.has(source)) return perContext.get(source);
 
   const attempt = (async () => {
     if (!ctx.audioWorklet) return false;
@@ -54,6 +71,6 @@ export function installWorklet(ctx, source) {
     }
   })();
 
-  loaded.set(ctx, attempt);
+  perContext.set(source, attempt);
   return attempt;
 }

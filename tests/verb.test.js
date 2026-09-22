@@ -5,7 +5,7 @@ import { VERB_DEFAULTS, MOST_DECAY, makeImpulse, roomProfile } from '../src/verb
 import {
   RESPONSE_BANDS, monoOf, bandOf, rt60, decayTimes, profileDistance, wetDryImpulse,
 } from '../src/fx/response.js';
-import reverb from '../src/modes/reverb.js';
+import { VERB_WORK as reverb } from '../src/work/reverb.js';
 import { LOOP_BEAT } from '../src/audio.js';
 
 const rate = 48000;
@@ -162,14 +162,14 @@ test('matching is marked on the decay, not on the knobs', () => {
   const answer = { ...VERB_DEFAULTS, decay: 2.4, preDelay: 40, damping: 0.5, mix: 0.3 };
   const puzzle = { settings: { exercise: 'match' }, answer };
 
-  assert.ok(reverb.score(answer, answer, 'hard', puzzle).correct, 'its own answer passes');
-  assert.match(reverb.score(answer, answer, 'hard', puzzle).cells[1].text, /that is the room/);
+  assert.ok(reverb.score(answer, { ...puzzle, tier: 'hard' }).correct, 'its own answer passes');
+  assert.match(reverb.score(answer, { ...puzzle, tier: 'hard' }).cells[1].text, /that is the room/);
 
-  const longer = reverb.score({ ...answer, decay: 4.5 }, answer, 'easy', puzzle);
+  const longer = reverb.score({ ...answer, decay: 4.5 }, { ...puzzle, tier: 'easy' });
   assert.ok(!longer.correct);
   assert.match(longer.cells[1].text, /too long$/);
 
-  const shorter = reverb.score({ ...answer, decay: 0.9 }, answer, 'easy', puzzle);
+  const shorter = reverb.score({ ...answer, decay: 0.9 }, { ...puzzle, tier: 'easy' });
   assert.match(shorter.cells[1].text, /too short$/);
 });
 
@@ -187,7 +187,7 @@ test('the targets are never the room the plugin opens on', () => {
 
       const { answer } = reverb.makePuzzle(rng, tier, { exercise: 'match' });
       const puzzle = { settings: { exercise: 'match' }, answer };
-      assert.ok(!reverb.score({ ...VERB_DEFAULTS }, answer, tier, puzzle).correct,
+      assert.ok(!reverb.score({ ...VERB_DEFAULTS }, { ...puzzle, tier: tier }).correct,
         `${tier} drew a target the opening settings already match`);
     }
   }
@@ -197,7 +197,7 @@ test('fitting the tempo wants the room gone by the beat, but not gone long befor
   const answer = { clearBy: 1, preDelay: Math.round((LOOP_BEAT / 4) * 1000), division: 'a 16th' };
   const puzzle = { settings: { exercise: 'tempo' }, answer };
   const guess = (decay, preDelay = answer.preDelay) => reverb.score(
-    { ...VERB_DEFAULTS, decay, preDelay }, answer, 'easy', puzzle);
+    { ...VERB_DEFAULTS, decay, preDelay }, { ...puzzle, tier: 'easy' });
 
   const ringing = guess(6);
   assert.ok(!ringing.correct);

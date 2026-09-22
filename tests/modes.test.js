@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
-import { HIT, NEAR, MISS } from '../src/modes/scoring.js';
+import { TOOLS as MODES, TOOL_IDS as MODE_IDS, toolOf as modeOf } from '../src/bench/registry.js';
+import { HIT, NEAR, MISS } from '../src/work/scoring.js';
 import {
   makePuzzle, createGame, submitGuess, reveal, settingsFor, startingGuess,
   scoreGuess,
@@ -11,27 +11,56 @@ import { answerAsGuess, wrongGuess, everyRound } from './helpers.js';
 
 const ROUNDS = everyRound();
 
-test('every mode is the same shape, so the shell never has to ask which it is', () => {
-  for (const [id, mode] of Object.entries(MODES)) {
-    assert.equal(mode.id, id, 'a mode knows its own key');
-    assert.ok(mode.label && mode.blurb && mode.lede, `${id} has to introduce itself`);
-    for (const fn of ['slots', 'makePuzzle', 'score', 'clues', 'play', 'reveal', 'weak']) {
-      assert.equal(typeof mode[fn], 'function', `${id} is missing ${fn}`);
+test('every tool is the same shape, so the shell never has to ask which it is', () => {
+  for (const [id, tool] of Object.entries(MODES)) {
+    assert.equal(tool.id, id, 'a tool knows its own key');
+    assert.ok(tool.label && tool.blurb && tool.lede, `${id} has to introduce itself`);
+
+    // What a tool is: something you can open, that explains itself.
+    assert.equal(typeof tool.open, 'function', `${id} cannot be opened`);
+    assert.ok(Array.isArray(tool.help) && tool.help.length, `${id} has no help`);
+    assert.ok(tool.notes, `${id} has no notes`);
+
+    // What the work is: exercises over it, and how to mark one.
+    for (const fn of ['slots', 'makePuzzle', 'score', 'hints', 'reveal', 'weak']) {
+      assert.equal(typeof tool[fn], 'function', `${id} is missing ${fn}`);
     }
-    assert.ok(Object.keys(mode.tiers).length >= 2, `${id} needs tiers to be a tier`);
-    for (const setting of mode.settings ?? []) {
-      assert.ok(setting.options.length >= 2, `${id}'s ${setting.id} has to be a choice`);
-    }
+    assert.ok(Object.keys(tool.tiers).length >= 2, `${id} needs tiers to be a tier`);
+    assert.ok(Object.keys(tool.exercises).length >= 2, `${id} needs more than one exercise`);
   }
 });
 
-test('a mode with its own interface can mount it, and asks for no slots', () => {
-  for (const [id, mode] of Object.entries(MODES)) {
-    if (!mode.surface) continue;
-    assert.equal(typeof mode.mount, 'function', `${id} claims a surface and cannot mount one`);
+test('an exercise says how to set a tool up, as data rather than as a mount', () => {
+  // The inversion, asserted. Every one of these used to be spelled out inside
+  // a `mount(el, { puzzle })`, which is why a change of exercise meant a
+  // teardown: the only way to apply one was to build a new plugin around it.
+  for (const [id, tool] of Object.entries(MODES)) {
+    for (const [key, exercise] of Object.entries(tool.exercises)) {
+      const where = `${id}/${key}`;
+      assert.equal(exercise.id, key, `${where} does not know its own key`);
+      assert.ok(exercise.label, `${where} has no name to put in the picker`);
+      assert.ok(exercise.source, `${where} does not say what it runs on`);
+      assert.ok(exercise.other, `${where} does not name the other side of the A/B`);
+
+      // The two that a session calls. Optional, because a reverb has no fault
+      // to put in its material and an exercise may have no target to hear -
+      // but if they are there they have to be callable with a puzzle.
+      for (const fn of ['faultOf', 'targetOf', 'answerOf']) {
+        if (exercise[fn]) assert.equal(typeof exercise[fn], 'function', `${where}.${fn}`);
+      }
+    }
+
+    // And the exercise picker is built from them, rather than listed twice.
+    const picker = (tool.settings ?? []).find((s) => s.id === 'exercise');
+    assert.ok(picker, `${id} has exercises and no way to choose one`);
+    assert.deepEqual(picker.options.map((o) => o.id), Object.keys(tool.exercises));
+  }
+});
+
+test('a tool is answered on the tool, so it asks for no slots', () => {
+  for (const [id, tool] of Object.entries(MODES)) {
     for (const [tier] of ROUNDS.filter(([which]) => which === id)) {
-      assert.equal(mode.slots(tier).length, 0, `${id} brings an interface and a picker`);
-      assert.equal(mode.clues(tier).length, 0, `${id} brings an interface and a clue row`);
+      assert.equal(tool.slots(tier).length, 0, `${id} brings an interface and a picker`);
     }
   }
 });
@@ -67,8 +96,7 @@ test('generated answers are always reachable from the controls on screen', () =>
     for (let i = 0; i < 40; i += 1) {
       const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `${id}-${tier}-${i}` });
 
-      if (MODES[id].surface) continue;
-
+  
       for (const slot of MODES[id].slots(tier, chosen)) {
         const answer = puzzle.answer[slot.id];
         if (slot.kind === 'range') {
@@ -107,7 +135,6 @@ test('a wrong guess is read as wrong, and says which way to move', () => {
 
     assert.ok(!score.correct, `${id}/${tier} accepted a guess outside every tolerance`);
 
-    if (MODES[id].surface) continue;
 
     const dialled = MODES[id].slots(tier, chosen).filter((slot) => slot.kind === 'range');
     if (!dialled.length) continue;
@@ -155,33 +182,8 @@ test('every mode can say what the answer was, and what kind of answer it is', ()
     const puzzle = makePuzzle({ mode: id, tier, settings: settingsFor(id, settings), seed: `reveal-${id}-${tier}` });
     assert.ok(reveal(puzzle).symbol, `${id}/${tier} reveals nothing`);
 
-    const kind = MODES[id].weak(puzzle.answer, puzzle);
+    const kind = MODES[id].weak(puzzle);
     assert.ok(kind.key !== undefined && kind.label, `${id}/${tier} cannot name a weak spot`);
-  }
-});
-
-test('the first clue is the one that plays the thing being worked on', () => {
-  for (const [id, tier, settings] of ROUNDS) {
-    if (MODES[id].surface) continue; // it runs its own transport
-
-    const clues = MODES[id].clues(tier, settingsFor(id, settings));
-    assert.ok(clues.length >= 1, `${id} offers no way to hear it`);
-    assert.equal(clues.filter((clue) => clue.primary).length, 1, `${id} needs exactly one primary clue`);
-    assert.equal(clues[0].primary, true, 'the primary clue comes first');
-  }
-});
-
-test('a production mode lets you hear your own settings, not only the target', () => {
-  for (const [id, tier, settings] of ROUNDS) {
-    const chosen = settingsFor(id, settings);
-    if (MODES[id].surface) continue; // hearing your own is the whole interface
-
-    const dialled = MODES[id].slots(tier, chosen).some((slot) => slot.kind === 'range');
-    if (!dialled) continue;
-
-    const ids = MODES[id].clues(tier, chosen).map((clue) => clue.id);
-    assert.ok(ids.includes('mine'),
-      `${id}/${tier}/${chosen.exercise ?? '-'} gives you controls and no way to hear them`);
   }
 });
 
@@ -210,7 +212,7 @@ test('the EQ is judged on the curve, so a different route to the same shape coun
     { type: 'peaking', frequency: 1000, gain: -3, q: 1, on: true },
   ];
 
-  const score = MODES.eq.score(sameShape, target, 'easy');
+  const score = MODES.eq.score(sameShape, { answer: target, tier: 'easy' });
   assert.ok(score.error < 1, `two halves of a cut should be the cut: ${score.error.toFixed(2)} dB out`);
   assert.ok(score.correct);
 });
@@ -218,7 +220,7 @@ test('the EQ is judged on the curve, so a different route to the same shape coun
 test('the EQ bar is set where doing nothing fails and a decibel out passes', () => {
   for (const tier of ['easy', 'medium', 'hard']) {
     const puzzle = makePuzzle({ mode: 'eq', tier, settings: { exercise: 'match' }, seed: `bar-${tier}` });
-    const score = (bands) => MODES.eq.score(bands, puzzle.answer, tier);
+    const score = (bands) => MODES.eq.score(bands, { ...puzzle, tier });
 
     assert.equal(score(puzzle.answer).error, 0, `${tier}: the target is its own answer`);
     assert.ok(score(puzzle.answer).correct);
@@ -241,14 +243,15 @@ test('the EQ bar is set where doing nothing fails and a decibel out passes', () 
 test('the EQ says where the two curves part company, and which way', () => {
   const target = [{ type: 'peaking', frequency: 2000, gain: 8, q: 1.5, on: true }];
 
-  const shy = MODES.eq.score([], target, 'easy');
+  const shy = MODES.eq.score([], { answer: target, tier: 'easy' });
   assert.match(shy.cells[1].text, /too shy$/, 'no boost where one was wanted');
   assert.match(shy.cells[1].text, /kHz|Hz/);
 
   const hot = MODES.eq.score(
-    [{ type: 'peaking', frequency: 2000, gain: 16, q: 1.5, on: true }], target, 'easy');
+    [{ type: 'peaking', frequency: 2000, gain: 16, q: 1.5, on: true }],
+    { answer: target, tier: 'easy' });
   assert.match(hot.cells[1].text, /too hot$/);
-  assert.equal(MODES.eq.score(target, target, 'easy').cells[1].text, 'sits on it');
+  assert.equal(MODES.eq.score(target, { answer: target, tier: 'easy' }).cells[1].text, 'sits on it');
 });
 
 test('evening out a loop hands you an uneven loop and no answer to copy', () => {
@@ -262,61 +265,26 @@ test('evening out a loop hands you an uneven loop and no answer to copy', () => 
 
 test('compression: too gentle and too hard are told apart', () => {
   const answer = { threshold: -20, ratio: 8, attack: 10, release: 120 };
-  const soft = MODES.compression.score({ ...answer, ratio: 1.5 }, answer, 'medium');
+  const soft = MODES.compression.score({ ...answer, ratio: 1.5 },
+    { answer, tier: 'medium', settings: { exercise: 'match' } });
   assert.equal(soft.cells[0].state, MISS);
   assert.match(soft.cells[1].text, /too gentle$/);
 
-  const hard = MODES.compression.score({ ...answer, threshold: -40, ratio: 20 }, answer, 'medium');
+  const hard = MODES.compression.score({ ...answer, threshold: -40, ratio: 20 },
+    { answer, tier: 'medium', settings: { exercise: 'match' } });
   assert.match(hard.cells[1].text, /too hard$/);
 });
 
 test('panning: the reading says how far off and on which side', () => {
   const puzzle = { settings: { exercise: 'place' }, answer: { pan: 0 } };
-  const off = MODES.panning.score({ pan: -0.5 }, { pan: 0 }, 'hard', puzzle);
+  const off = MODES.panning.score({ pan: -0.5 }, { ...puzzle, tier: 'hard' });
   assert.equal(off.cells[0].state, MISS);
   assert.match(off.cells[1].text, /left$/);
 
   // And a placing that is where it should be reads as one.
-  const there = MODES.panning.score({ pan: 0 }, { pan: 0 }, 'hard', puzzle);
+  const there = MODES.panning.score({ pan: 0 }, { ...puzzle, tier: 'hard' });
   assert.equal(there.cells[0].state, HIT);
   assert.equal(there.cells[0].text, 'Centre');
-});
-
-test('a mode plays every one of its clues, without touching the DOM', () => {
-  // Every mode's play() is handed an engine and asks it for sounds; nothing in
-  // a mode reaches for the page. A recording engine proves it here, and keeps
-  // the modes testable without a browser.
-  const calls = [];
-  const node = () => ({ connect: (next) => next ?? {}, gain: {}, pan: {}, frequency: {}, Q: {},
-                        threshold: {}, knee: {}, ratio: {}, attack: {}, release: {}, type: '' });
-  const engine = {
-    ensure: () => {},
-    stop: () => {},
-    get start() { return 0; },
-    ctx: {
-      createBiquadFilter: node,
-      createStereoPanner: node,
-      createDynamicsCompressor: node,
-      createGain: node,
-    },
-    out: {},
-    note: (...args) => calls.push(['note', ...args]),
-    tone: (...args) => calls.push(['tone', ...args]),
-    playNotes: (...args) => calls.push(['notes', ...args]),
-    playBed: (...args) => calls.push(['bed', ...args]),
-  };
-
-  for (const [id, tier, settings] of ROUNDS) {
-    const chosen = settingsFor(id, settings);
-    const puzzle = makePuzzle({ mode: id, tier, settings: chosen, seed: `play-${id}-${tier}` });
-    const guess = { ...startingGuess(id, tier), ...answerAsGuess(puzzle) };
-
-    for (const clue of MODES[id].clues(tier, chosen)) {
-      calls.length = 0;
-      MODES[id].play(engine, { puzzle, clue: clue.id, settings: chosen, tier, guess });
-      assert.ok(calls.length > 0, `${id}/${tier}: the ${clue.id} clue makes no sound`);
-    }
-  }
 });
 
 test('a whole round can be played out in every mode, tier and exercise', () => {

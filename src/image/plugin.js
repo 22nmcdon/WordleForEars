@@ -208,47 +208,15 @@ export class ImagePlugin {
       }
     });
 
-    this.el.querySelector('#imageSource').addEventListener('change', async (e) => {
-      this.player.source = e.target.value;
-      this.player.buffer = null;
-      await this.player.prepare();
-      if (this.player.playing) await this.player.play();
-      this.measure();
-      this.draw();
-    });
-
-    this.el.querySelector('#imageFile').addEventListener('change', (e) => this.open(e));
+    this.el.querySelector('#imageSource')
+      .addEventListener('change', (e) => this.setSource(e.target.value));
+    this.el.querySelector('#imageFile')
+      .addEventListener('change', (e) => this.loadFile(e.target.files?.[0]));
 
     this.resize = () => this.draw();
     window.addEventListener('resize', this.resize);
   }
 
-  async open(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const yours = this.el.querySelector('#imageYours');
-    yours.hidden = false;
-    yours.textContent = 'reading…';
-
-    try {
-      const buffer = await this.player.load(file);
-      this.el.querySelector('#imageSource').value = 'yours';
-      this.player.source = 'yours';
-      this.player.buffer = null;
-      await this.player.prepare();
-      await this.player.play();
-      this.playing(true);
-      yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`
-        + (buffer.numberOfChannels > 1 ? '' : ' · mono');
-    } catch {
-      yours.textContent = 'that file could not be read';
-      return;
-    }
-
-    this.measure();
-    this.draw();
-  }
 
   changed() {
     this.syncKnobs();
@@ -277,6 +245,81 @@ export class ImagePlugin {
     this.reading = imageReading(sample.left, sample.right, sample.rate, this.settings,
       { source: this.player.source ?? null });
     return this.reading;
+  }
+
+  /* ---------- the lifecycle ---------- */
+
+  /**
+   * Put the controls somewhere, without a round having to be started for it.
+   *
+   * New, and it is the piece the whole inversion turns on. Until now a tool
+   * was mounted by an exercise and torn down when the exercise changed, so
+   * "what is this set to" only ever had one answer per lifetime. A workbench
+   * needs the other direction: the tool is the thing that stays, and an
+   * exercise is something that arrives, sets it up, and leaves it as it found
+   * it.
+   */
+  setState(next) {
+    Object.assign(this.settings, next);
+    this.buildKnobs();
+    this.changed();
+  }
+
+  /**
+   * Change what is running through it.
+   *
+   * Lifted out of the `<select>` handler, which is now three lines that call
+   * this. An exercise has to be able to put its own material on a tool it did
+   * not mount, and reaching into somebody's change event to do it is how a
+   * plugin ends up with a second, worse copy of its own lifecycle.
+   */
+  async setSource(id) {
+    this.player.source = id;
+    this.player.buffer = null;
+    const picker = this.el.querySelector('#imageSource');
+    if (picker) picker.value = id;
+
+    await this.player.prepare().catch(() => {});
+    if (this.player.playing) await this.player.play();
+    this.measure();
+    this.draw();
+  }
+
+  /** A width somebody else already applied, before it reached you. */
+  async setFault(fault) {
+    this.player.setFault(fault ?? null);
+    this.player.buffer = null;
+    await this.player.prepare().catch(() => {});
+    if (this.player.playing) await this.player.play();
+    this.measure();
+    this.draw();
+  }
+
+  /**
+   * Something the player brought themselves.
+   *
+   * Was the body of an event handler, which meant nothing could load a file
+   * except a file input. Takes a File now, and the handler unwraps the event.
+   */
+  async loadFile(file) {
+    if (!file) return false;
+
+    const yours = this.el.querySelector('#imageYours');
+    if (yours) { yours.hidden = false; yours.textContent = 'reading…'; }
+
+    try {
+      const buffer = await this.player.load(file);
+      await this.setSource('yours');
+      if (!this.player.playing) { await this.player.play(); this.playing(true); }
+      if (yours) {
+        yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`
+          + (buffer.numberOfChannels > 1 ? '' : ' · mono');
+      }
+      return true;
+    } catch {
+      if (yours) yours.textContent = 'that file could not be read';
+      return false;
+    }
   }
 
   /* ---------- what this is a reading of ---------- */
@@ -356,6 +399,11 @@ export class ImagePlugin {
   /* ---------- drawing ---------- */
 
   draw() {
+    // A plugin that has been taken off the sheet stops drawing. Its setters
+    // are async - rendering a loop takes a second - so their promises can
+    // land after it has been torn down, and writing to elements that are no
+    // longer in the page is how a clean handover throws.
+    if (this.gone) return;
     const ink = imagePalette(this.el);
     this.drawScope(ink);
     this.drawBands(ink);
@@ -513,7 +561,14 @@ export class ImagePlugin {
     this.player.setTarget(target);
   }
 
+  /** Draw the answer over yours, or take it back off. */
   showTarget(target) {
+    if (!target) {
+      this.target = null;
+      this.draw();
+      return;
+    }
+
     const sample = this.player.sample();
     if (sample) {
       this.target = imageReading(sample.left, sample.right, sample.rate, target).values;
@@ -521,14 +576,38 @@ export class ImagePlugin {
     this.draw();
   }
 
-  /** Take the drawn target back off. */
-  clearTarget() {
-    this.target = null;
-    this.draw();
+  /**
+   * What the monitor is set to.
+   *
+   * A getter, and new. Restoring a tool to what it was doing means knowing
+   * what it was doing, and nothing could say. Note that it is not `playing`:
+   * that one is a setter on all six, so asking it a question answers by
+   * turning the sound off.
+   */
+  source() {
+    return this.player.source ?? null;
+  }
+
+  /** What the other side of the A/B is currently called. */
+  abLabel() {
+    return this.el.querySelector('#imageOther')?.textContent ?? null;
+  }
+
+  /** The pair a guess is read against, rendered and handed over. */
+  async material() {
+    await this.player.prepare().catch(() => null);
+    return this.player.sample() ?? null;
+  }
+
+  /** The other side of the A/B, named for what it actually is. */
+  nameAB(label) {
+    const slot = this.el.querySelector('#imageOther');
+    if (slot) slot.textContent = label;
   }
 
   nameOther(label) {
-    this.el.querySelector('#imageOther').textContent = label;
+    const slot = this.el.querySelector('#imageOther');
+    if (slot) slot.textContent = label;
   }
 
   lock() {
@@ -551,6 +630,7 @@ export class ImagePlugin {
   }
 
   destroy() {
+    this.gone = true;
     clearTimeout(this.soon);
     cancelAnimationFrame(this.frame);
     window.removeEventListener('resize', this.resize);

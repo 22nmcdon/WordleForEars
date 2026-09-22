@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 
 import { NOTES, notesFor } from '../src/notes/index.js';
-import { MODES } from '../src/modes/index.js';
+import { TOOLS as MODES } from '../src/bench/registry.js';
 import { MODULES } from '../scripts/modules.mjs';
 
 // Prose that nobody can reach is prose nobody wrote.
@@ -55,19 +55,22 @@ test('nothing reaches across and hides what another function owns', () => {
   // it. Five paragraphs, dark for months, because nothing ever asserted that
   // what was written could be read.
   //
-  // So: mountSurface may hide the things it owns, and nothing else.
+  // So: whatever puts an exercise on the tool may hide the things it owns,
+  // and nothing else. The function has been renamed twice since - it was
+  // mountSurface, and mounting is exactly what no longer happens - but the
+  // rule it is held to has not changed.
   const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 
-  const from = main.indexOf('function mountSurface()');
-  const to = main.indexOf('function buildClue()');
-  assert.ok(from > 0 && to > from, 'mountSurface is no longer where this test looks');
+  const from = main.indexOf('async function putExercise()');
+  const to = main.indexOf('function buildHead()');
+  assert.ok(from > 0 && to > from, 'putExercise is no longer where this test looks');
 
   const hidden = [...main.slice(from, to).matchAll(/\$\('(#[\w-]+)'\)\.hidden\s*=/g)]
     .map((m) => m[1])
     .sort();
 
   assert.deepEqual(hidden, ['#clue', '#picker'],
-    `mountSurface writes .hidden on ${hidden.join(', ') || 'nothing'}`);
+    `putExercise writes .hidden on ${hidden.join(', ') || 'nothing'}`);
 });
 
 test('each tool’s DSP points at the notes that explain it', () => {

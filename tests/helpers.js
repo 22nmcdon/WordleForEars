@@ -1,4 +1,4 @@
-import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
+import { TOOLS as MODES, TOOL_IDS as MODE_IDS, toolOf as modeOf } from '../src/bench/registry.js';
 
 /**
  * The answer, as a guess - or nothing, when the round does not have one.
@@ -17,7 +17,10 @@ import { MODES, MODE_IDS, modeOf } from '../src/modes/index.js';
 export function answerAsGuess(puzzle) {
   const spec = modeOf(puzzle.mode);
 
-  if (spec.surface) {
+  // Every one of the six is a tool now, and a tool is answered on the tool -
+  // which is what having no slots means. There used to be a `surface` flag
+  // saying the same thing, back when a mode could be a row of chips instead.
+  if (!spec.slots(puzzle.tier, puzzle.settings).length) {
     if (!puzzle.answer) return null;
     if (RESULT_MARKED[puzzle.mode]?.includes(puzzle.settings?.exercise)) return null;
     return puzzle.answer;
@@ -62,9 +65,9 @@ const RESULT_MARKED = {
 export function wrongGuess(puzzle, nth = 0) {
   const spec = modeOf(puzzle.mode);
 
-  // A surface hands back whatever it builds, so a wrong guess has to be in
-  // that shape. Both of these are a long way from any target their mode sets.
-  if (spec.surface) {
+  // A tool hands back whatever it is set to, so a wrong guess has to be in
+  // that shape. All of these are a long way from any target their work sets.
+  if (!spec.slots(puzzle.tier, puzzle.settings).length) {
     if (puzzle.mode === 'compression') {
       // Far lower and far harder than any answer this mode makes, and a
       // different threshold each time so no two attempts are the same guess.
@@ -140,8 +143,7 @@ export function everyRound() {
   const rounds = [];
 
   for (const id of MODE_IDS) {
-    const exercise = (MODES[id].settings ?? []).find((setting) => setting.id === 'exercise');
-    const exercises = exercise ? exercise.options.map((option) => option.id) : [null];
+    const exercises = Object.keys(MODES[id].exercises);
 
     for (const tier of Object.keys(MODES[id].tiers)) {
       for (const which of exercises) {

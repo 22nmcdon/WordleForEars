@@ -96,7 +96,11 @@ export class EQPlugin {
     this.engine = engine;
     this.bands = bands;
     this.onChange = onChange;
-    this.source = source;
+    // Not `this.source`: `source()` is the getter for it, and an own property
+    // of the same name shadows the method - so asking a freshly built EQ what
+    // it was monitoring called a string. The session caught the TypeError,
+    // decided the exercise could not be set up, and left the tool untouched.
+    this.monitoring = source;
     this.selected = this.bands.findIndex((band) => band.type === 'peaking');
     this.target = null; // drawn only once the round is over
     this.player = new EQPlayer(engine, this.bands);
@@ -166,7 +170,7 @@ export class EQPlugin {
 
     this.canvas = this.el.querySelector('#eqCanvas');
     this.readout = this.el.querySelector('#eqRead');
-    this.el.querySelector('#eqSource').value = this.source;
+    this.el.querySelector('#eqSource').value = this.monitoring;
 
     this.buildBandButtons();
     this.buildShape();
@@ -372,10 +376,8 @@ export class EQPlugin {
       }
     });
 
-    this.el.querySelector('#eqSource').addEventListener('change', (e) => {
-      this.source = e.target.value;
-      if (this.player.playing) this.player.play(this.source);
-    });
+    this.el.querySelector('#eqSource')
+      .addEventListener('change', (e) => this.setSource(e.target.value));
 
     this.el.querySelector('#eqTilt').addEventListener('change', (e) => {
       this.tilt = Number(e.target.value);
@@ -393,32 +395,8 @@ export class EQPlugin {
       this.draw();
     });
 
-    this.el.querySelector('#eqFile').addEventListener('change', async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      const yours = this.el.querySelector('#eqYours');
-      yours.hidden = false;
-      yours.textContent = 'reading…';
-
-      try {
-        const buffer = await this.player.load(file);
-        this.el.querySelector('#eqSource').value = 'yours';
-        this.source = 'yours';
-        // Straight onto it: somebody who has just chosen a file wants to hear
-        // their own material, not to be told it loaded.
-        await this.player.play('yours');
-        this.playing(true);
-        this.player.setBands(this.bands);
-        // Named where it was chosen, so it reads as what the picker is set to.
-        const yours = this.el.querySelector('#eqYours');
-        yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
-      } catch {
-        yours.textContent = 'that file could not be read';
-        return;
-      }
-      this.draw();
-    });
+    this.el.querySelector('#eqFile')
+      .addEventListener('change', (e) => this.loadFile(e.target.files?.[0]));
 
     this.resize = () => this.draw();
     window.addEventListener('resize', this.resize);
@@ -616,7 +594,7 @@ export class EQPlugin {
       return;
     }
 
-    await this.player.play(this.source);
+    await this.player.play(this.monitoring);
     this.player.setBands(this.bands);
     this.playing(true);
   }
@@ -661,6 +639,11 @@ export class EQPlugin {
   }
 
   draw() {
+    // A plugin that has been taken off the sheet stops drawing. Its setters
+    // are async - rendering a loop takes a second - so their promises can
+    // land after it has been torn down, and writing to elements that are no
+    // longer in the page is how a clean handover throws.
+    if (this.gone) return;
     const { width, height } = this.size();
     if (!width || !height) return;
 
@@ -891,22 +874,126 @@ export class EQPlugin {
 
   /* ---------- what the round does to it ---------- */
 
+  /**
+   * Draw the answer over yours, or take it back off.
+   *
+   * Null is new, and until the inversion there was nothing that could have
+   * asked for it: a round ended, the answer went up, and the whole plugin was
+   * destroyed a moment later. A tool that outlives the exercise has to be able
+   * to forget one, or the next exercise is worked against the last one's
+   * ghost.
+   */
   showTarget(bands) {
-    this.target = bands;
+    this.target = bands ?? null;
     this.draw();
   }
 
-  setFault(fault) {
-    this.player.setFault(fault);
+  /* ---------- the lifecycle ---------- */
+
+  /**
+   * Put the bands somewhere, without a round having to be started for it.
+   *
+   * New, and it is the piece the whole inversion turns on. Until now a tool
+   * was mounted by an exercise and torn down when the exercise changed, so
+   * "what is this set to" only ever had one answer per lifetime. A workbench
+   * needs the other direction: the tool is the thing that stays, and an
+   * exercise is something that arrives, sets it up, and leaves it as it found
+   * it.
+   *
+   * The strip is mutated rather than replaced, because the player, the drag
+   * handles and the readout all hold the same array. Six bands in, six bands
+   * out, always: `newStrip` decides what a strip is and this does not.
+   */
+  setState(bands) {
+    if (!Array.isArray(bands)) return;
+    bands.forEach((band, i) => { if (this.bands[i]) Object.assign(this.bands[i], band); });
+
+    this.reading = null;
+    this.syncControls();
+    this.player.setBands(this.bands);
+    this.draw();
+    this.onChange?.(this.state());
   }
 
+  /** A resonance somebody else left in the sample, before it reached you. */
+  setFault(fault) {
+    this.player.setFault(fault ?? null);
+    this.draw();
+  }
+
+  /**
+   * What is on the other side of the A/B, or nothing.
+   *
+   * Null had never been passed here: a round ended and the plugin was
+   * destroyed. `EQPlayer.tune` walks the bands it is given, so null went
+   * straight into a `forEach` - an error nobody had a way to reach.
+   */
   setTarget(bands) {
-    this.player.setTarget(bands);
+    this.player.setTarget(bands ?? []);
+  }
+
+  /** Change what is running through it. */
+  async setSource(id) {
+    this.monitoring = id;
+    const picker = this.el.querySelector('#eqSource');
+    if (picker) picker.value = id;
+    if (this.player.playing) await this.player.play(id);
+    this.draw();
+  }
+
+  /** Something the player brought themselves. */
+  async loadFile(file) {
+    if (!file) return false;
+
+    const yours = this.el.querySelector('#eqYours');
+    if (yours) { yours.hidden = false; yours.textContent = 'reading…'; }
+
+    try {
+      const buffer = await this.player.load(file);
+      this.monitoring = 'yours';
+      const picker = this.el.querySelector('#eqSource');
+      if (picker) picker.value = 'yours';
+      // Straight onto it: somebody who has just chosen a file wants to hear
+      // their own material, not to be told it loaded.
+      await this.player.play('yours');
+      this.playing(true);
+      this.player.setBands(this.bands);
+      if (yours) yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
+      this.draw();
+      return true;
+    } catch {
+      if (yours) yours.textContent = 'that file could not be read';
+      return false;
+    }
   }
 
   /** The other side of the A/B, named for what it actually is. */
+  /**
+   * What the monitor is set to.
+   *
+   * A getter, and new. Restoring a tool to what it was doing means knowing
+   * what it was doing, and nothing could say. Note that it is not `playing`:
+   * that one is a setter on all six, so asking it a question answers by
+   * turning the sound off.
+   */
+  source() {
+    return this.monitoring ?? null;
+  }
+
+  /** What the other side of the A/B is currently called. */
+  abLabel() {
+    return this.el.querySelector('#eqOther')?.textContent ?? null;
+  }
+
+  /** The other side of the A/B, named for what it actually is. */
+  nameAB(label) {
+    const slot = this.el.querySelector('#eqOther');
+    if (slot) slot.textContent = label;
+  }
+
   nameOther(label) {
-    this.el.querySelector('#eqOther').textContent = label;
+    const slot = this.el.querySelector('#eqOther');
+    if (slot) slot.textContent = label;
   }
 
   /* ---------- what this is a reading of ---------- */
@@ -962,6 +1049,7 @@ export class EQPlugin {
   }
 
   destroy() {
+    this.gone = true;
     this.player.stop();
     cancelAnimationFrame(this.frame);
     window.removeEventListener('resize', this.resize);

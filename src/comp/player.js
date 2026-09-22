@@ -35,6 +35,7 @@ export class CompPlayer {
     this.keySamples = null;
     this.trace = null;      // reused between passes
     this.reading = null;    // what the last pass found
+    this.evenSamples = null; // the bed with the fault taken out, for marking
   }
 
   async build() {
@@ -91,6 +92,16 @@ export class CompPlayer {
       this.keyBuffer = null;
       this.keySamples = null;
     }
+
+    // The same bed without the fault in it, and never played: it is what
+    // evening the loop out is aiming at, which makes it the answer rather
+    // than a clue. Rendered here because the fault is set here - the exercise
+    // used to render it itself, in an unawaited block, which is how scoring
+    // ended up able to fall back to a synthetic probe.
+    this.evenBuffer = this.uneven && this.source !== 'yours'
+      ? await this.engine.renderLoop(this.source)
+      : signal;
+    this.evenSamples = this.evenBuffer.getChannelData(0);
 
     this.measure();
     return true;

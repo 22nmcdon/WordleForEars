@@ -1,5 +1,5 @@
 // Local-only persistence: no accounts, no server (per the MVP plan).
-import { modeOf } from './modes/index.js';
+import { toolOf } from './bench/registry.js';
 
 // v2: the attempt counts became open-ended buckets when the guess ceiling went,
 // and the finished-daily lock-out went with it. A v1 store is not migrated -
@@ -107,7 +107,7 @@ export function recordGame(game) {
   bucket.played += 1;
   // What counts as "one kind of answer" is the mode's to say: a band of
   // trouble, a kind of room, how hard something is driven.
-  const kind = modeOf(puzzle.mode).weak(puzzle.answer, puzzle);
+  const kind = toolOf(puzzle.mode).weak(puzzle);
   const perKind = bucket.byAnswer[kind.key] ?? { seen: 0, solved: 0, label: kind.label };
   perKind.seen += 1;
 

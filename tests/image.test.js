@@ -7,7 +7,7 @@ import {
 } from '../src/image/field.js';
 import { imagerSource } from '../src/image/node.js';
 import { mulberry32 } from '../src/random.js';
-import panning from '../src/modes/panning.js';
+import { IMAGE_WORK as panning } from '../src/work/panning.js';
 
 const rate = 48000;
 
@@ -163,11 +163,11 @@ test('matching an image is marked on the worst band, not the average of them', (
   const answer = { ...IMAGE_DEFAULTS, low: 0.3 };
   const puzzle = { settings: { exercise: 'match' }, answer, material };
 
-  assert.ok(panning.score(answer, answer, 'hard', puzzle).correct, 'its own answer passes');
+  assert.ok(panning.score(answer, { ...puzzle, tier: 'hard' }).correct, 'its own answer passes');
 
   // One band in completely the wrong place is a wrong answer, however right
   // the other five are - which is the whole reason for reading the worst.
-  const off = panning.score({ ...IMAGE_DEFAULTS }, answer, 'easy', puzzle);
+  const off = panning.score({ ...IMAGE_DEFAULTS }, { ...puzzle, tier: 'easy' });
   assert.ok(!off.correct);
   // And it says which band, because that is the band it was read on.
   assert.match(off.cells[1].text, /^too wide at \d/);
@@ -181,7 +181,7 @@ test('rescuing the low end wants it narrowed, and nothing else thrown away', () 
   const broken = runImager(clean.left, clean.right, rate, { ...IMAGE_DEFAULTS, ...fault });
   const material = { left: broken.left, right: broken.right, rate };
   const puzzle = { settings: { exercise: 'mono' }, fault, answer: null, material };
-  const try_ = (settings) => panning.score({ ...IMAGE_DEFAULTS, ...settings }, null, 'medium', puzzle);
+  const try_ = (settings) => panning.score({ ...IMAGE_DEFAULTS, ...settings }, { ...puzzle, tier: 'medium' });
 
   assert.ok(!try_({}).correct, 'leaving it alone is not a fix');
   assert.match(try_({}).cells[0].text, /^mono costs /);
@@ -208,10 +208,10 @@ test('placing is read off the audio, on both sides', () => {
   const answer = { ...IMAGE_DEFAULTS, pan: -0.5 };
   const puzzle = { settings: { exercise: 'place' }, answer, material };
 
-  assert.ok(panning.score(answer, answer, 'hard', puzzle).correct);
-  assert.match(panning.score(answer, answer, 'hard', puzzle).cells[1].text, /where it is$/);
+  assert.ok(panning.score(answer, { ...puzzle, tier: 'hard' }).correct);
+  assert.match(panning.score(answer, { ...puzzle, tier: 'hard' }).cells[1].text, /where it is$/);
 
-  const wrongSide = panning.score({ ...IMAGE_DEFAULTS, pan: 0.5 }, answer, 'easy', puzzle);
+  const wrongSide = panning.score({ ...IMAGE_DEFAULTS, pan: 0.5 }, { ...puzzle, tier: 'easy' });
   assert.ok(!wrongSide.correct);
   assert.match(wrongSide.cells[1].text, /too far right$/);
 });

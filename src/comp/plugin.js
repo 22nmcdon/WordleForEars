@@ -244,48 +244,15 @@ export class CompPlugin {
       this.changed();
     });
 
-    this.el.querySelector('#compSource').addEventListener('change', async (e) => {
-      this.player.source = e.target.value;
-      this.player.samples = null;
-      await this.player.prepare();
-      if (this.player.playing) await this.player.play();
-      this.restage();
-      this.draw();
-    });
-
-    this.el.querySelector('#compFile').addEventListener('change', (e) => this.open(e));
+    this.el.querySelector('#compSource')
+      .addEventListener('change', (e) => this.setSource(e.target.value));
+    this.el.querySelector('#compFile')
+      .addEventListener('change', (e) => this.loadFile(e.target.files?.[0]));
 
     this.resize = () => { this.restage(); this.draw(); };
     window.addEventListener('resize', this.resize);
   }
 
-  async open(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const yours = this.el.querySelector('#compYours');
-    yours.hidden = false;
-    yours.textContent = 'reading…';
-
-    try {
-      const buffer = await this.player.load(file);
-      this.el.querySelector('#compSource').value = 'yours';
-      this.player.source = 'yours';
-      this.player.samples = null;
-      await this.player.prepare();
-      // Straight onto it: somebody who has just chosen a file wants to hear
-      // their own material, not to be told it loaded.
-      await this.player.play();
-      this.playing(true);
-      yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`;
-    } catch {
-      yours.textContent = 'that file could not be read';
-      return;
-    }
-
-    this.restage();
-    this.draw();
-  }
 
   /**
    * The curve is a control surface, not a picture.
@@ -472,6 +439,11 @@ export class CompPlugin {
   }
 
   draw() {
+    // A plugin that has been taken off the sheet stops drawing. Its setters
+    // are async - rendering a loop takes a second - so their promises can
+    // land after it has been torn down, and writing to elements that are no
+    // longer in the page is how a clean handover throws.
+    if (this.gone) return;
     const ink = compPalette(this.el);
     this.drawCurve(ink);
     this.drawTrace(ink);
@@ -681,6 +653,89 @@ export class CompPlugin {
     });
   }
 
+  /* ---------- the lifecycle ---------- */
+
+  /**
+   * Put the controls somewhere, without a round having to be started for it.
+   *
+   * New, and it is the piece the whole inversion turns on. Until now a tool
+   * was mounted by an exercise and torn down when the exercise changed, so
+   * "what is this set to" only ever had one answer per lifetime. A workbench
+   * needs the other direction: the tool is the thing that stays, and an
+   * exercise is something that arrives, sets it up, and leaves it as it found
+   * it.
+   */
+  setState(next) {
+    Object.assign(this.settings, next);
+    this.buildKnobs();
+    this.changed();
+  }
+
+  /**
+   * Change what is running through it.
+   *
+   * Lifted out of the `<select>` handler, which is now three lines that call
+   * this. An exercise has to be able to put its own material on a tool it did
+   * not mount, and reaching into somebody's change event to do it is how a
+   * plugin ends up with a second, worse copy of its own lifecycle.
+   */
+  async setSource(id, { key, uneven } = {}) {
+    this.player.source = id;
+    this.player.samples = null;
+    // The key and the fault travel with the source because they are part of
+    // what the material is: ducking needs a kick to duck to, and levelling
+    // needs a bed that is actually uneven. They were constructor arguments,
+    // which is why changing exercise used to mean building a new plugin.
+    if (key !== undefined) this.player.key = key;
+    if (uneven !== undefined) this.player.uneven = uneven;
+
+    const picker = this.el.querySelector('#compSource');
+    if (picker) picker.value = id;
+
+    await this.player.prepare().catch(() => {});
+    if (this.player.playing) await this.player.play();
+    this.restage();
+    this.draw();
+  }
+
+  /**
+   * How uneven the loop handed to you is.
+   *
+   * The compressor's fault is not a filter sitting in the path, it is how far
+   * apart the hits of the bed are before you touch them - so setting it means
+   * re-rendering the material rather than changing a node.
+   */
+  async setFault(fault) {
+    await this.setSource(this.player.source, { uneven: fault?.uneven ?? fault ?? 0 });
+  }
+
+  /**
+   * Something the player brought themselves.
+   *
+   * Was the body of an event handler, which meant nothing could load a file
+   * except a file input. Takes a File now, and the handler unwraps the event.
+   */
+  async loadFile(file) {
+    if (!file) return false;
+
+    const yours = this.el.querySelector('#compYours');
+    if (yours) { yours.hidden = false; yours.textContent = 'reading…'; }
+
+    try {
+      const buffer = await this.player.load(file);
+      await this.setSource('yours');
+      if (!this.player.playing) { await this.player.play(); this.playing(true); }
+      if (yours) {
+        yours.textContent = `${file.name} · ${Math.round(buffer.duration)}s`
+          + (buffer.numberOfChannels > 1 ? '' : ' · mono');
+      }
+      return true;
+    } catch {
+      if (yours) yours.textContent = 'that file could not be read';
+      return false;
+    }
+  }
+
   /* ---------- what this is a reading of ---------- */
 
   /** What the compressor is set to. */
@@ -757,15 +812,60 @@ export class CompPlugin {
     this.player.setTarget(target);
   }
 
+  /** Draw the answer over yours, or take it back off. */
   showTarget(target) {
-    this.target = target;
-    this.player.setTarget(target);
+    this.target = target ?? null;
+    this.player.setTarget(this.target);
     this.restage();
     this.draw();
   }
 
+  /**
+   * What the monitor is set to.
+   *
+   * A getter, and new. Restoring a tool to what it was doing means knowing
+   * what it was doing, and nothing could say. Note that it is not `playing`:
+   * that one is a setter on all six, so asking it a question answers by
+   * turning the sound off.
+   */
+  source() {
+    return this.player.source ?? null;
+  }
+
+  /** What the other side of the A/B is currently called. */
+  abLabel() {
+    return this.el.querySelector('#compOther')?.textContent ?? null;
+  }
+
+  /**
+   * The loop a guess is read against, rendered and handed over.
+   *
+   * Asked for by the session rather than filled in from an unawaited IIFE the
+   * way the exercise used to do it - which meant scoring could fall back to a
+   * synthetic probe, and "marked on drums while hearing noise" was a thing
+   * that could happen.
+   */
+  async material() {
+    await this.player.prepare().catch(() => null);
+    if (!this.player.samples) return null;
+
+    return {
+      rate: this.engine?.ctx?.sampleRate ?? 48000,
+      samples: this.player.samples,
+      even: this.player.evenSamples ?? this.player.samples,
+      key: this.player.keySamples ?? null,
+    };
+  }
+
+  /** The other side of the A/B, named for what it actually is. */
+  nameAB(label) {
+    const slot = this.el.querySelector('#compOther');
+    if (slot) slot.textContent = label;
+  }
+
   nameOther(label) {
-    this.el.querySelector('#compOther').textContent = label;
+    const slot = this.el.querySelector('#compOther');
+    if (slot) slot.textContent = label;
   }
 
   lock() {
@@ -788,6 +888,7 @@ export class CompPlugin {
   }
 
   destroy() {
+    this.gone = true;
     cancelAnimationFrame(this.frame);
     window.removeEventListener('resize', this.resize);
     this.player.destroy();

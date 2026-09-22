@@ -7,7 +7,7 @@ import {
 } from '../src/echo/line.js';
 import { monoOf, bandOf, profileDistance, RESPONSE_BANDS } from '../src/fx/response.js';
 import { LOOP_BEAT } from '../src/audio.js';
-import delay from '../src/modes/delay.js';
+import { ECHO_WORK as delay } from '../src/work/delay.js';
 
 const rate = 48000;
 const echo = (params) => makeEcho(rate, { ...ECHO_DEFAULTS, ...params });
@@ -163,14 +163,14 @@ test('matching is marked on how it dies away, and knows a wrong note when it hea
   const answer = { ...ECHO_DEFAULTS, time: timeOf(0.5), feedback: 0.55, mix: 0.3 };
   const puzzle = { settings: { exercise: 'match' }, answer };
 
-  assert.ok(delay.score(answer, answer, 'hard', puzzle).correct, 'its own answer passes');
-  assert.match(delay.score(answer, answer, 'hard', puzzle).cells[1].text, /that is the delay/);
+  assert.ok(delay.score(answer, { ...puzzle, tier: 'hard' }).correct, 'its own answer passes');
+  assert.match(delay.score(answer, { ...puzzle, tier: 'hard' }).cells[1].text, /that is the delay/);
 
-  const long = delay.score({ ...answer, time: answer.time * 1.5 }, answer, 'easy', puzzle);
+  const long = delay.score({ ...answer, time: answer.time * 1.5 }, { ...puzzle, tier: 'easy' });
   assert.ok(!long.correct, 'a whole note value out is not a match');
   assert.match(long.cells[1].text, /too long$/);
 
-  const short = delay.score({ ...answer, time: answer.time / 1.5 }, answer, 'easy', puzzle);
+  const short = delay.score({ ...answer, time: answer.time / 1.5 }, { ...puzzle, tier: 'easy' });
   assert.match(short.cells[1].text, /too short$/);
 });
 
@@ -180,13 +180,13 @@ test('finding the time lands you on one note value and not its neighbour', () =>
       const answer = { ...ECHO_DEFAULTS, time: timeOf(target.beats), division: target.label };
       const puzzle = { settings: { exercise: 'find' }, answer };
 
-      const exact = delay.score({ ...ECHO_DEFAULTS, time: answer.time }, answer, tier, puzzle);
+      const exact = delay.score({ ...ECHO_DEFAULTS, time: answer.time }, { ...puzzle, tier: tier });
       assert.ok(exact.correct, `${tier} did not accept ${target.label}`);
       assert.match(exact.cells[0].text, /locked to the track/);
 
       for (const other of DIVISIONS) {
         if (other.id === target.id) continue;
-        const wrong = delay.score({ ...ECHO_DEFAULTS, time: timeOf(other.beats) }, answer, tier, puzzle);
+        const wrong = delay.score({ ...ECHO_DEFAULTS, time: timeOf(other.beats) }, { ...puzzle, tier: tier });
         assert.ok(!wrong.correct,
           `${tier} accepted ${other.label} as ${target.label}`);
       }
@@ -198,14 +198,14 @@ test('finding the time says which way to move, and nothing about the tempo', () 
   const answer = { ...ECHO_DEFAULTS, time: timeOf(0.5), division: '1/8' };
   const puzzle = { settings: { exercise: 'find' }, answer };
 
-  const long = delay.score({ ...ECHO_DEFAULTS, time: answer.time * 1.5 }, answer, 'easy', puzzle);
+  const long = delay.score({ ...ECHO_DEFAULTS, time: answer.time * 1.5 }, { ...puzzle, tier: 'easy' });
   assert.match(long.cells[0].text, /^50% out$/);
   assert.match(long.cells[1].text, /^too long$/);
 
   // And it does not name the note value until you have found it, because the
   // note value is the question.
   for (const cell of long.cells) assert.doesNotMatch(cell.text, /1\/8|1\/4|1\/16|triplet|dotted/);
-  assert.match(delay.score({ ...ECHO_DEFAULTS, time: answer.time }, answer, 'easy', puzzle).cells[1].text, /1\/8/);
+  assert.match(delay.score({ ...ECHO_DEFAULTS, time: answer.time }, { ...puzzle, tier: 'easy' }).cells[1].text, /1\/8/);
 });
 
 test('the targets are never the delay the plugin opens on', () => {
@@ -222,7 +222,7 @@ test('the targets are never the delay the plugin opens on', () => {
 
       const { answer } = delay.makePuzzle(rng, tier, { exercise: 'match' });
       const puzzle = { settings: { exercise: 'match' }, answer };
-      assert.ok(!delay.score({ ...ECHO_DEFAULTS }, answer, tier, puzzle).correct,
+      assert.ok(!delay.score({ ...ECHO_DEFAULTS }, { ...puzzle, tier: tier }).correct,
         `${tier} drew a target the opening settings already match`);
     }
   }
